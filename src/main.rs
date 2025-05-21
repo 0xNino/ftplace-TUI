@@ -7,12 +7,12 @@ use crossterm::{
 use keyring::Entry;
 use ratatui::prelude::*;
 
-mod api_client; // Declare the module
+mod api_client;
 mod app_state;
-mod art; // Declare the new art module // Declare the new app_state module
+mod art;
 mod event_handler;
-mod ui; // Declare the new ui module // Declare the new event_handler module
-use api_client::ApiClient; // Removed BoardGetResponse and ProfileGetResponse
+mod ui;
+use api_client::ApiClient;
 use app_state::{App, InputMode};
 
 const KEYRING_SERVICE_NAME: &str = "ftplace_tui_service";

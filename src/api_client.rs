@@ -1,7 +1,6 @@
 use reqwest::header::{CONTENT_TYPE, COOKIE};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
-use serde_json;
 use std::fs::File; // For file logging
 use std::io::Write; // For file logging
 

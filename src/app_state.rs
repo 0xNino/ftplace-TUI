@@ -2,18 +2,15 @@ use crate::api_client::{ApiClient, ColorInfo, PixelNetwork, UserInfos};
 use crate::art::PixelArt;
 
 #[derive(Debug, PartialEq, Eq)]
+#[derive(Default)]
 pub enum InputMode {
+    #[default]
     None,
     Cookie,
     ArtEditor,         // New mode for creating/editing pixel art
     ArtEditorFileName, // New mode for entering filename for saving art
 }
 
-impl Default for InputMode {
-    fn default() -> Self {
-        InputMode::None
-    }
-}
 
 #[derive(Debug)]
 pub struct App {
