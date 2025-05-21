@@ -1,0 +1,348 @@
+use crate::app_state::{App, InputMode};
+use ratatui::prelude::*;
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+
+pub fn render_ui(app: &mut App, frame: &mut Frame) {
+    let main_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Cookie Input / Header
+            Constraint::Min(0),    // Board Display or Art Editor
+            Constraint::Length(5), // Controls / Status
+        ])
+        .split(frame.size());
+
+    // Cookie Input Area
+    let cookie_input_title = if app.input_mode == InputMode::Cookie {
+        "Cookie (Editing):"
+    } else {
+        "Cookie (Press 'c' to edit):"
+    };
+    let cookie_text = if app.cookie_input_buffer.is_empty() && app.input_mode != InputMode::Cookie {
+        match app.api_client.get_auth_cookie_preview() {
+            Some(preview) => format!("[set: {}...]", preview),
+            None => "[not set]".to_string(),
+        }
+    } else {
+        app.cookie_input_buffer.clone()
+    };
+    let cookie_input_widget = Paragraph::new(cookie_text.as_str()).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(cookie_input_title),
+    );
+    frame.render_widget(cookie_input_widget, main_layout[0]);
+
+    // Board Display Area or Art Editor Area
+    match app.input_mode {
+        InputMode::ArtEditor => {
+            render_art_editor_ui(app, frame, main_layout[1]);
+        }
+        _ => {
+            // Original Board Display Logic
+            let board_area = main_layout[1];
+            let board_block = Block::default().borders(Borders::ALL).title(format!(
+                "Board Display (Viewport @ {},{} - Size {}x{})",
+                app.board_viewport_x,
+                app.board_viewport_y,
+                app.board.len(),
+                if app.board.is_empty() {
+                    0
+                } else {
+                    app.board[0].len()
+                }
+            ));
+            frame.render_widget(board_block, board_area);
+
+            let inner_board_area = main_layout[1].inner(Margin {
+                vertical: 1,
+                horizontal: 1,
+            });
+
+            // Clamp viewport coordinates
+            let board_pixel_height = app.board.len();
+            let board_pixel_width = if board_pixel_height > 0 {
+                app.board[0].len()
+            } else {
+                0
+            };
+
+            if board_pixel_height > (inner_board_area.height * 2) as usize {
+                let max_scroll_y_pixels =
+                    (board_pixel_height - (inner_board_area.height * 2) as usize) as u16;
+                app.board_viewport_y = app.board_viewport_y.min(max_scroll_y_pixels);
+            } else {
+                app.board_viewport_y = 0;
+            }
+            if board_pixel_width > inner_board_area.width as usize {
+                let max_scroll_x_pixels =
+                    (board_pixel_width - inner_board_area.width as usize) as u16;
+                app.board_viewport_x = app.board_viewport_x.min(max_scroll_x_pixels);
+            } else {
+                app.board_viewport_x = 0;
+            }
+
+            let default_board_color_info = app.colors.iter().find(|c| c.id == 1);
+            let default_board_rgb = default_board_color_info
+                .map_or(Color::Black, |ci| Color::Rgb(ci.red, ci.green, ci.blue)); // Fallback to Black if color 1 not found
+
+            if !app.board.is_empty() && !app.colors.is_empty() {
+                for y_screen_cell in 0..inner_board_area.height {
+                    for x_screen_cell in 0..inner_board_area.width {
+                        let board_px_x = app.board_viewport_x as usize + x_screen_cell as usize;
+                        let board_px_y_top =
+                            app.board_viewport_y as usize + (y_screen_cell * 2) as usize;
+                        let board_px_y_bottom = board_px_y_top + 1;
+
+                        let top_pixel_color = if board_px_y_top < app.board.len()
+                            && board_px_x < app.board[board_px_y_top].len()
+                        {
+                            app.board[board_px_y_top][board_px_x]
+                                .as_ref()
+                                .map_or(default_board_rgb, |p| {
+                                    get_ratatui_color(app, p.c, default_board_rgb)
+                                })
+                        } else {
+                            default_board_rgb // Out of bounds for top pixel
+                        };
+
+                        let bottom_pixel_color = if board_px_y_bottom < app.board.len()
+                            && board_px_x < app.board[board_px_y_bottom].len()
+                        {
+                            app.board[board_px_y_bottom][board_px_x]
+                                .as_ref()
+                                .map_or(default_board_rgb, |p| {
+                                    get_ratatui_color(app, p.c, default_board_rgb)
+                                })
+                        } else {
+                            default_board_rgb // Out of bounds for bottom pixel, or if board has odd height and this is the last cell row
+                        };
+
+                        let cell_char = '▀';
+                        let style = Style::default().fg(top_pixel_color).bg(bottom_pixel_color);
+
+                        frame
+                            .buffer_mut()
+                            .get_mut(
+                                inner_board_area.x + x_screen_cell,
+                                inner_board_area.y + y_screen_cell,
+                            )
+                            .set_char(cell_char)
+                            .set_style(style);
+                    }
+                }
+            }
+
+            // Overlay loaded_art if present - this needs to be aware of the half-blocks and viewport
+            if let Some(art) = &app.loaded_art {
+                for art_pixel in &art.pixels {
+                    let art_abs_x = art.board_x + art_pixel.x;
+                    let art_abs_y = art.board_y + art_pixel.y;
+
+                    // Is this art pixel visible in the current viewport?
+                    if art_abs_x >= app.board_viewport_x as i32
+                        && art_abs_x < (app.board_viewport_x + inner_board_area.width) as i32
+                        && art_abs_y >= app.board_viewport_y as i32
+                        && art_abs_y < (app.board_viewport_y + inner_board_area.height * 2) as i32
+                    {
+                        let screen_cell_x = (art_abs_x - app.board_viewport_x as i32) as u16;
+                        // art_abs_y is the pixel row. The cell row is (art_abs_y - viewport_y) / 2
+                        let screen_cell_y = ((art_abs_y - app.board_viewport_y as i32) / 2) as u16;
+
+                        let target_abs_screen_x = inner_board_area.x + screen_cell_x;
+                        let target_abs_screen_y = inner_board_area.y + screen_cell_y;
+
+                        // Ensure the target cell is within the drawable inner_board_area bounds
+                        if screen_cell_x < inner_board_area.width
+                            && screen_cell_y < inner_board_area.height
+                        {
+                            let art_color =
+                                get_ratatui_color(app, art_pixel.color_id, Color::Magenta);
+                            let cell = frame
+                                .buffer_mut()
+                                .get_mut(target_abs_screen_x, target_abs_screen_y);
+
+                            cell.set_char('▀');
+                            if (art_abs_y - app.board_viewport_y as i32) % 2 == 0 {
+                                cell.set_fg(art_color);
+                            } else {
+                                cell.set_bg(art_color);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Status Message Area
+    let status_widget = Paragraph::new(app.status_message.as_str())
+        .wrap(Wrap { trim: true })
+        .block(Block::default().borders(Borders::ALL).title("Status"));
+    frame.render_widget(status_widget, main_layout[2]);
+
+    // Cursor for cookie input
+    if app.input_mode == InputMode::Cookie {
+        frame.set_cursor(
+            main_layout[0].x + app.cookie_input_buffer.chars().count() as u16 + 1,
+            main_layout[0].y + 1,
+        );
+    }
+}
+
+pub fn render_art_editor_ui(app: &mut App, frame: &mut Frame, area: Rect) {
+    let editor_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(0),     // Art Canvas
+            Constraint::Length(20), // Color Palette (fixed width for now)
+        ])
+        .split(area);
+
+    let canvas_area = editor_layout[0];
+    let palette_area = editor_layout[1];
+
+    let editor_block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(
+            "Pixel Art Editor (Canvas: {}x{}, Cursor: {},{}, Color: {}) - Arrows, Space, s:Save, Esc:Exit",
+            app.art_editor_canvas_width,
+            app.art_editor_canvas_height,
+            app.art_editor_cursor_x,
+            app.art_editor_cursor_y,
+            app.art_editor_selected_color_id
+        ));
+    frame.render_widget(editor_block.clone(), canvas_area); // Clone for the title, draw border over full area
+
+    let inner_canvas_area = canvas_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+
+    // Render the art canvas
+    for y in 0..app.art_editor_canvas_height {
+        for x in 0..app.art_editor_canvas_width {
+            if x >= inner_canvas_area.width || y >= inner_canvas_area.height {
+                continue; // Don't draw outside the allocated screen space for canvas
+            }
+
+            let mut cell_char = ' '; // Default empty cell
+            let mut cell_style = Style::default().fg(Color::DarkGray); // Default empty cell color
+
+            if let Some(art) = &app.current_editing_art {
+                if let Some(pixel) = art
+                    .pixels
+                    .iter()
+                    .find(|p| p.x == x as i32 && p.y == y as i32)
+                {
+                    cell_char = '█'; // Block character for a pixel
+                    cell_style =
+                        Style::default().fg(get_ratatui_color(app, pixel.color_id, Color::White));
+                } else {
+                    // Optional: Draw a grid
+                    cell_char = '.';
+                }
+            }
+
+            // Highlight cursor position
+            if x as i32 == app.art_editor_cursor_x && y as i32 == app.art_editor_cursor_y {
+                cell_style = cell_style.bg(Color::Yellow);
+                if cell_char == ' ' || cell_char == '.' {
+                    // if empty, show cursor more clearly
+                    cell_char = '+';
+                    // Ensure cursor char itself is visible if background is yellow
+                    cell_style = cell_style.fg(Color::Black);
+                } else {
+                    // If there's a pixel, just highlight background
+                    cell_style = cell_style.fg(get_ratatui_color(
+                        app,
+                        app.art_editor_selected_color_id,
+                        Color::White,
+                    ));
+                }
+            }
+
+            frame
+                .buffer_mut()
+                .get_mut(inner_canvas_area.x + x, inner_canvas_area.y + y)
+                .set_char(cell_char)
+                .set_style(cell_style);
+        }
+    }
+
+    // Placeholder for Color Palette
+    let palette_block = Block::default()
+        .borders(Borders::ALL)
+        .title("Colors (TODO)");
+    frame.render_widget(palette_block, palette_area);
+    let colors_text = app
+        .colors
+        .iter()
+        .map(|c| {
+            format!(
+                "ID {}: RGB({},{},{})
+",
+                c.id, c.red, c.green, c.blue
+            )
+        })
+        .collect::<String>();
+    let palette_content = Paragraph::new(colors_text).wrap(Wrap { trim: true });
+    frame.render_widget(
+        palette_content,
+        palette_area.inner(Margin {
+            vertical: 1,
+            horizontal: 1,
+        }),
+    );
+
+    // If in filename input mode, render that input field over the palette or status bar
+    if app.input_mode == InputMode::ArtEditorFileName {
+        let popup_area = centered_rect(60, 20, frame.size()); // Adjust size as needed
+        let filename_input_area = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3)].as_ref())
+            .split(popup_area)[0]; // Take the top part for the input box
+
+        let filename_input_widget = Paragraph::new(app.art_editor_filename_buffer.as_str()).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Save Art As (Enter to Save, Esc to Cancel):"),
+        );
+        frame.render_widget(Clear, filename_input_area); // Clear the area first
+        frame.render_widget(filename_input_widget, filename_input_area);
+        frame.set_cursor(
+            filename_input_area.x + app.art_editor_filename_buffer.chars().count() as u16 + 1,
+            filename_input_area.y + 1,
+        );
+    }
+}
+
+/// helper function to create a centered rect using up certain percentage of the available rect `r`
+pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
+}
+
+pub fn get_ratatui_color(app: &App, color_id: i32, default_fallback_color: Color) -> Color {
+    app.colors
+        .iter()
+        .find(|c| c.id == color_id)
+        .map_or(default_fallback_color, |color_info| {
+            Color::Rgb(color_info.red, color_info.green, color_info.blue)
+        })
+}

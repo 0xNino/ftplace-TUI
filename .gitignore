@@ -1,0 +1,19 @@
+# Rust target directory
+target/
+
+# Specific output files
+pixel_arts/
+
+# Compiled artifacts and debug symbols
+*.pdb
+*.rlib
+*.dylib
+*.so
+*.dll
+*.exe
+
+# Environment files
+.env 
+
+dev/
+.cursor/
