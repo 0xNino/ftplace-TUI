@@ -217,7 +217,14 @@ impl ApiClient {
 
     pub async fn get_board(&self) -> Result<BoardGetResponse, ApiError> {
         let url = format!("{}/api/get", self.base_url);
-        let response = self.client.get(&url).send().await?;
+        let mut request_builder = self.client.get(&url);
+
+        if let Some(token_value) = &self.auth_cookie {
+            let cookie_header_value = format!("token={}", token_value);
+            request_builder = request_builder.header(COOKIE, cookie_header_value);
+        }
+
+        let response = request_builder.send().await?;
         Self::handle_response(response).await
     }
 

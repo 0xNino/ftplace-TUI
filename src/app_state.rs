@@ -1,8 +1,8 @@
 use crate::api_client::{ApiClient, ColorInfo, PixelNetwork, UserInfos};
 use crate::art::PixelArt;
+use std::time::Instant;
 
-#[derive(Debug, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, PartialEq, Eq, Default)]
 pub enum InputMode {
     #[default]
     None,
@@ -10,7 +10,6 @@ pub enum InputMode {
     ArtEditor,         // New mode for creating/editing pixel art
     ArtEditorFileName, // New mode for entering filename for saving art
 }
-
 
 #[derive(Debug)]
 pub struct App {
@@ -26,6 +25,7 @@ pub struct App {
     pub board_viewport_x: u16,       // X offset of the viewport in pixels
     pub board_viewport_y: u16,       // Y offset of the viewport in pixel rows (top row of the pair)
     pub initial_board_fetched: bool, // New flag
+    pub last_board_refresh: Option<Instant>, // For auto-refresh
 
     // Pixel Art Editor State
     pub current_editing_art: Option<PixelArt>, // Holds the art being created/edited

@@ -60,8 +60,8 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
             });
 
             // Clamp viewport coordinates
-            let board_pixel_height = app.board.len();
-            let board_pixel_width = if board_pixel_height > 0 {
+            let board_pixel_width = app.board.len();
+            let board_pixel_height = if board_pixel_width > 0 {
                 app.board[0].len()
             } else {
                 0
@@ -94,10 +94,10 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
                             app.board_viewport_y as usize + (y_screen_cell * 2) as usize;
                         let board_px_y_bottom = board_px_y_top + 1;
 
-                        let top_pixel_color = if board_px_y_top < app.board.len()
-                            && board_px_x < app.board[board_px_y_top].len()
+                        let top_pixel_color = if board_px_x < app.board.len()
+                            && board_px_y_top < app.board[board_px_x].len()
                         {
-                            app.board[board_px_y_top][board_px_x]
+                            app.board[board_px_x][board_px_y_top]
                                 .as_ref()
                                 .map_or(default_board_rgb, |p| {
                                     get_ratatui_color(app, p.c, default_board_rgb)
@@ -106,10 +106,10 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
                             default_board_rgb // Out of bounds for top pixel
                         };
 
-                        let bottom_pixel_color = if board_px_y_bottom < app.board.len()
-                            && board_px_x < app.board[board_px_y_bottom].len()
+                        let bottom_pixel_color = if board_px_x < app.board.len()
+                            && board_px_y_bottom < app.board[board_px_x].len()
                         {
-                            app.board[board_px_y_bottom][board_px_x]
+                            app.board[board_px_x][board_px_y_bottom]
                                 .as_ref()
                                 .map_or(default_board_rgb, |p| {
                                     get_ratatui_color(app, p.c, default_board_rgb)
@@ -220,51 +220,98 @@ pub fn render_art_editor_ui(app: &mut App, frame: &mut Frame, area: Rect) {
     });
 
     // Render the art canvas
-    for y in 0..app.art_editor_canvas_height {
-        for x in 0..app.art_editor_canvas_width {
-            if x >= inner_canvas_area.width || y >= inner_canvas_area.height {
-                continue; // Don't draw outside the allocated screen space for canvas
-            }
+    // y_cell iterates over the rows of terminal cells in the canvas_area
+    for y_cell in 0..inner_canvas_area.height {
+        // x_cell iterates over the columns of terminal cells in the canvas_area
+        for x_cell in 0..inner_canvas_area.width {
+            // These are the art pixel coordinates corresponding to the current cell
+            let art_px_x = x_cell as i32;
+            let art_px_y_top = (y_cell * 2) as i32;
+            let art_px_y_bottom = (y_cell * 2 + 1) as i32;
 
-            let mut cell_char = ' '; // Default empty cell
-            let mut cell_style = Style::default().fg(Color::DarkGray); // Default empty cell color
+            let mut top_pixel_color = Color::DarkGray; // Default for top half of the cell
+            let mut bottom_pixel_color = Color::DarkGray; // Default for bottom half of the cell
 
             if let Some(art) = &app.current_editing_art {
-                if let Some(pixel) = art
-                    .pixels
-                    .iter()
-                    .find(|p| p.x == x as i32 && p.y == y as i32)
-                {
-                    cell_char = '█'; // Block character for a pixel
-                    cell_style =
-                        Style::default().fg(get_ratatui_color(app, pixel.color_id, Color::White));
+                // Check if the current cell's corresponding art pixels are within the defined art dimensions
+                if art_px_x < app.art_editor_canvas_width as i32 {
+                    // Top pixel of the cell
+                    if art_px_y_top < app.art_editor_canvas_height as i32 {
+                        if let Some(pixel) = art
+                            .pixels
+                            .iter()
+                            .find(|p| p.x == art_px_x && p.y == art_px_y_top)
+                        {
+                            top_pixel_color = get_ratatui_color(app, pixel.color_id, Color::White);
+                        } else {
+                            // No art pixel here, could draw grid dot if desired
+                            // top_pixel_color remains DarkGray (or some grid color)
+                        }
+                    } else {
+                        // This part of cell (top art pixel) is outside art's defined height.
+                        // top_pixel_color remains DarkGray.
+                    }
+
+                    // Bottom pixel of the cell
+                    if art_px_y_bottom < app.art_editor_canvas_height as i32 {
+                        if let Some(pixel) = art
+                            .pixels
+                            .iter()
+                            .find(|p| p.x == art_px_x && p.y == art_px_y_bottom)
+                        {
+                            bottom_pixel_color =
+                                get_ratatui_color(app, pixel.color_id, Color::White);
+                        } else {
+                            // No art pixel here
+                            // bottom_pixel_color remains DarkGray
+                        }
+                    } else {
+                        // This part of cell (bottom art pixel) is outside art's defined height.
+                        // bottom_pixel_color remains DarkGray.
+                    }
                 } else {
-                    // Optional: Draw a grid
-                    cell_char = '.';
+                    // This cell (art_px_x) is outside art's defined width.
+                    // Both top_pixel_color and bottom_pixel_color remain DarkGray.
                 }
             }
 
+            let cell_char = '▀';
+            let mut cell_style = Style::default().fg(top_pixel_color).bg(bottom_pixel_color);
+
             // Highlight cursor position
-            if x as i32 == app.art_editor_cursor_x && y as i32 == app.art_editor_cursor_y {
-                cell_style = cell_style.bg(Color::Yellow);
-                if cell_char == ' ' || cell_char == '.' {
-                    // if empty, show cursor more clearly
-                    cell_char = '+';
-                    // Ensure cursor char itself is visible if background is yellow
-                    cell_style = cell_style.fg(Color::Black);
-                } else {
-                    // If there's a pixel, just highlight background
-                    cell_style = cell_style.fg(get_ratatui_color(
-                        app,
-                        app.art_editor_selected_color_id,
-                        Color::White,
-                    ));
+            // app.art_editor_cursor_x and app.art_editor_cursor_y are PIXEL coordinates of the cursor.
+            // Check if the cursor is on one of the art pixels this cell represents.
+            if art_px_x == app.art_editor_cursor_x
+                && (art_px_y_top == app.art_editor_cursor_y
+                    || art_px_y_bottom == app.art_editor_cursor_y)
+            {
+                // Ensure the cursor is actually within the drawable area of the art piece
+                if app.art_editor_cursor_x < app.art_editor_canvas_width as i32
+                    && app.art_editor_cursor_y < app.art_editor_canvas_height as i32
+                {
+                    if art_px_y_top == app.art_editor_cursor_y {
+                        // Cursor is on the top art pixel of this cell
+                        // If the original top_pixel_color was the default DarkGray (empty),
+                        // make the yellow more prominent. Otherwise, blend with existing color.
+                        if top_pixel_color == Color::DarkGray {
+                            cell_style = Style::default().fg(Color::Yellow).bg(bottom_pixel_color);
+                        } else {
+                            cell_style = cell_style.fg(Color::Yellow); // Highlight by changing foreground
+                        }
+                    } else if art_px_y_bottom == app.art_editor_cursor_y {
+                        // Cursor is on the bottom art pixel of this cell
+                        if bottom_pixel_color == Color::DarkGray {
+                            cell_style = Style::default().fg(top_pixel_color).bg(Color::Yellow);
+                        } else {
+                            cell_style = cell_style.bg(Color::Yellow); // Highlight by changing background
+                        }
+                    }
                 }
             }
 
             frame
                 .buffer_mut()
-                .get_mut(inner_canvas_area.x + x, inner_canvas_area.y + y)
+                .get_mut(inner_canvas_area.x + x_cell, inner_canvas_area.y + y_cell)
                 .set_char(cell_char)
                 .set_style(cell_style);
         }

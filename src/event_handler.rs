@@ -2,23 +2,33 @@ use crate::api_client::ApiError;
 use crate::app_state::{App, InputMode};
 use crate::art::{load_default_pixel_art, ArtPixel, PixelArt};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use keyring::Entry;
 use std::fs::File;
 use std::io;
 use std::io::Write;
 use std::path::Path;
-use std::time::Duration;
-
-const KEYRING_SERVICE_NAME: &str = "ftplace_tui_service";
-const KEYRING_USER_NAME: &str = "session_cookie";
+use std::time::{Duration, Instant};
 
 impl App {
     pub async fn handle_events(&mut self) -> io::Result<()> {
+        let mut should_refresh_board = false;
+        if self.initial_board_fetched && self.api_client.get_auth_cookie_preview().is_some() {
+            if let Some(last_refresh) = self.last_board_refresh {
+                if last_refresh.elapsed() >= Duration::from_secs(10) {
+                    should_refresh_board = true;
+                }
+            }
+        }
+
         if !self.initial_board_fetched {
             self.initial_board_fetched = true;
             self.status_message = "Fetching initial board state...".to_string();
             self.fetch_board_data().await;
             return Ok(());
+        }
+
+        if should_refresh_board {
+            self.status_message = "Auto-refreshing board...".to_string();
+            self.fetch_board_data().await;
         }
 
         if event::poll(Duration::from_millis(50))? {
@@ -145,55 +155,15 @@ impl App {
                                     let cookie_to_set = self.cookie_input_buffer.trim().to_string();
                                     if !cookie_to_set.is_empty() {
                                         self.api_client.set_cookie(cookie_to_set.clone());
-                                        match Entry::new(KEYRING_SERVICE_NAME, KEYRING_USER_NAME) {
-                                            Ok(entry) => match entry.set_password(&cookie_to_set) {
-                                                Ok(_) => {
-                                                    self.status_message = format!(
-                                                        "Cookie set and saved to keyring. Length: {}. Press 'p' to get profile.",
-                                                        cookie_to_set.len()
-                                                    );
-                                                }
-                                                Err(e) => {
-                                                    self.status_message = format!(
-                                                        "Cookie set, but FAILED to save to keyring: {}.",
-                                                        e
-                                                    );
-                                                }
-                                            },
-                                            Err(e) => {
-                                                self.status_message = format!(
-                                                    "Cookie set, but FAILED to access keyring service '{}' for saving: {}.",
-                                                    KEYRING_SERVICE_NAME, e
-                                                );
-                                            }
-                                        }
+                                        self.status_message = format!(
+                                            "Cookie set for this session. Length: {}. Press 'p' to get profile.",
+                                            cookie_to_set.len()
+                                        );
                                     } else {
                                         self.api_client.clear_cookie();
-                                        match Entry::new(KEYRING_SERVICE_NAME, KEYRING_USER_NAME) {
-                                            Ok(entry) => match entry.delete_credential() {
-                                                Ok(_) => {
-                                                    self.status_message =
-                                                        "Cookie input empty. Cleared from keyring."
-                                                            .to_string();
-                                                }
-                                                Err(keyring::Error::NoEntry) => {
-                                                    self.status_message =
-                                                        "Cookie input empty. No cookie was found in keyring to delete.".to_string();
-                                                }
-                                                Err(e) => {
-                                                    self.status_message = format!(
-                                                        "Cookie input empty. FAILED to delete from keyring: {}.",
-                                                        e
-                                                    );
-                                                }
-                                            },
-                                            Err(e) => {
-                                                self.status_message = format!(
-                                                    "Cookie input empty. FAILED to access keyring service '{}' for deletion: {}.",
-                                                    KEYRING_SERVICE_NAME, e
-                                                );
-                                            }
-                                        }
+                                        self.status_message =
+                                            "Cookie input empty. Cleared for this session."
+                                                .to_string();
                                     }
                                     self.input_mode = InputMode::None;
                                     self.cookie_input_buffer.clear();
@@ -316,12 +286,20 @@ impl App {
                         self.board[0].len()
                     }
                 );
+                self.last_board_refresh = Some(Instant::now());
             }
             Err(e) => {
-                self.status_message = format!(
-                    "Error fetching board: {:?}. Try 'r' to refresh or 'c' for cookie.",
-                    e
-                );
+                match e {
+                    ApiError::Unauthorized => {
+                        self.status_message = "Session expired or cookie invalid. Auto-refresh paused. Provide new cookie via CLI or 'c'.".to_string();
+                        self.api_client.clear_cookie();
+                    }
+                    _ => {
+                        self.status_message =
+                            format!("Error fetching board: {:?}. Try 'r' to refresh.", e);
+                    }
+                }
+                self.last_board_refresh = Some(Instant::now());
             }
         }
     }
@@ -437,31 +415,30 @@ impl App {
                             ..
                         } => {
                             self.api_client.clear_cookie();
-                            let mut cleared_message =
+                            let cleared_message =
                                 "Authentication failed (token expired or invalid). Cookie cleared from app.".to_string();
-                            match Entry::new(KEYRING_SERVICE_NAME, KEYRING_USER_NAME) {
-                                Ok(entry) => match entry.delete_credential() {
-                                    Ok(_) => {
-                                        cleared_message.push_str(" Also deleted from keyring.");
-                                    }
-                                    Err(keyring::Error::NoEntry) => {
-                                        cleared_message.push_str(" No corresponding entry in keyring or already deleted.");
-                                    }
-                                    Err(e) => {
-                                        cleared_message.push_str(&format!(
-                                            " Failed to delete from keyring: {}.",
-                                            e
-                                        ));
-                                    }
-                                },
-                                Err(e) => {
-                                    cleared_message.push_str(&format!(
-                                        " Failed to access keyring service '{}' for deletion: {}.",
-                                        KEYRING_SERVICE_NAME, e
-                                    ));
-                                }
+                            error_message = format!("{} Please use --cookie argument or restart with a new cookie via CLI. Halting placement.", cleared_message);
+                            self.status_message = error_message;
+                            return;
+                        }
+                        ApiError::ApiErrorResponse {
+                            status,
+                            error_response,
+                        } => {
+                            if status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                                || status.as_u16() == 425
+                                || status.as_u16() == 420
+                            {
+                                self.status_message = format!(
+                                    "Cooldown hit while placing pixel {}/{}: {}. Refreshing board to see timers...",
+                                    index + 1,
+                                    total_pixels,
+                                    error_response.message
+                                );
+                                self.fetch_board_data().await;
+                                return;
                             }
-                            error_message = format!("{} Please press 'c' to enter a new cookie from the website. Halting placement.", cleared_message);
+                            error_message.push_str(" Halting placement.");
                         }
                         _ => {
                             error_message.push_str(" Halting placement.");
@@ -475,9 +452,10 @@ impl App {
         }
 
         self.status_message = format!(
-            "Finished placing art '{}'. Refresh board with 'r'.",
+            "Finished placing art '{}'. Refreshing board...",
             art_to_place.name
         );
+        self.fetch_board_data().await;
     }
 
     async fn save_current_art_to_file(&mut self, filename: String) {
