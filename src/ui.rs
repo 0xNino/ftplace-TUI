@@ -1,45 +1,87 @@
 use crate::app_state::{App, InputMode};
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
 pub fn render_ui(app: &mut App, frame: &mut Frame) {
     let main_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Cookie Input / Header
+            Constraint::Length(5), // Increased height for Base URL selection list or input
             Constraint::Min(0),    // Board Display or Art Editor
             Constraint::Length(5), // Controls / Status
         ])
         .split(frame.size());
 
-    // Cookie Input Area
-    let cookie_input_title = if app.input_mode == InputMode::Cookie {
-        "Cookie (Editing):"
-    } else {
-        "Cookie (Press 'c' to edit):"
-    };
-    let cookie_text = if app.cookie_input_buffer.is_empty() && app.input_mode != InputMode::Cookie {
-        match app.api_client.get_auth_cookie_preview() {
-            Some(preview) => format!("[set: {}...]", preview),
-            None => "[not set]".to_string(),
-        }
-    } else {
-        app.cookie_input_buffer.clone()
-    };
-    let cookie_input_widget = Paragraph::new(cookie_text.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(cookie_input_title),
-    );
-    frame.render_widget(cookie_input_widget, main_layout[0]);
-
-    // Board Display Area or Art Editor Area
+    // --- Input Area (Top) ---
+    let input_area_rect = main_layout[0];
     match app.input_mode {
-        InputMode::ArtEditor => {
+        InputMode::EnterBaseUrl => {
+            let items: Vec<ListItem> = app
+                .base_url_options
+                .iter()
+                .map(|opt| ListItem::new(opt.as_str()))
+                .collect();
+
+            let list_widget = List::new(items)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Select API Base URL (Enter to confirm, q to quit):"),
+                )
+                .highlight_style(
+                    Style::default()
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::LightBlue),
+                )
+                .highlight_symbol("> ");
+
+            let mut list_state = ListState::default();
+            list_state.select(Some(app.base_url_selection_index));
+
+            frame.render_stateful_widget(list_widget, input_area_rect, &mut list_state);
+        }
+        InputMode::EnterCustomBaseUrlText
+        | InputMode::EnterAccessToken
+        | InputMode::EnterRefreshToken => {
+            let title = match app.input_mode {
+                InputMode::EnterCustomBaseUrlText => "Custom Base URL (Editing):",
+                InputMode::EnterAccessToken => "Access Token (Editing):",
+                InputMode::EnterRefreshToken => "Refresh Token (Editing):",
+                _ => "Input:", // Should not happen if logic is correct
+            };
+            let input_widget = Paragraph::new(app.input_buffer.as_str())
+                .block(Block::default().borders(Borders::ALL).title(title));
+            frame.render_widget(input_widget, input_area_rect);
+            frame.set_cursor(
+                input_area_rect.x + app.input_buffer.chars().count() as u16 + 1,
+                input_area_rect.y + 1,
+            );
+        }
+        _ => {
+            // For InputMode::None or ArtEditor modes, show current config (simplified)
+            let mut display_text = format!("Base: {}", app.api_client.get_base_url_preview());
+            if let Some(token_preview) = app.api_client.get_auth_cookie_preview() {
+                display_text.push_str(&format!("; Token: [{}...]", token_preview));
+            } else {
+                display_text.push_str("; Token: [not set]");
+            }
+            let config_display_widget = Paragraph::new(display_text).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Current Config (c to edit AccessToken)"),
+            );
+            frame.render_widget(config_display_widget, input_area_rect);
+        }
+    }
+
+    // --- Board Display Area or Art Editor Area (main_layout[1]) ---
+    match app.input_mode {
+        InputMode::ArtEditor | InputMode::ArtEditorFileName => {
+            // ArtEditorFileName should also show editor
             render_art_editor_ui(app, frame, main_layout[1]);
         }
         _ => {
-            // Original Board Display Logic
+            // Includes EnterBaseUrl, EnterCustomBaseUrlText, EnterAccessToken, EnterRefreshToken, None
             let board_area = main_layout[1];
             let board_block = Block::default().borders(Borders::ALL).title(format!(
                 "Board Display (Viewport @ {},{} - Size {}x{})",
@@ -175,19 +217,14 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
         }
     }
 
-    // Status Message Area
+    // --- Status Message Area (main_layout[2]) ---
     let status_widget = Paragraph::new(app.status_message.as_str())
         .wrap(Wrap { trim: true })
         .block(Block::default().borders(Borders::ALL).title("Status"));
     frame.render_widget(status_widget, main_layout[2]);
 
-    // Cursor for cookie input
-    if app.input_mode == InputMode::Cookie {
-        frame.set_cursor(
-            main_layout[0].x + app.cookie_input_buffer.chars().count() as u16 + 1,
-            main_layout[0].y + 1,
-        );
-    }
+    // Cursor handling is now within specific input mode rendering logic above for text input
+    // or handled by ListState for selection.
 }
 
 pub fn render_art_editor_ui(app: &mut App, frame: &mut Frame, area: Rect) {

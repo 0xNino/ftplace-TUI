@@ -11,19 +11,15 @@ use std::time::{Duration, Instant};
 impl App {
     pub async fn handle_events(&mut self) -> io::Result<()> {
         let mut should_refresh_board = false;
-        if self.initial_board_fetched && self.api_client.get_auth_cookie_preview().is_some() {
+        if self.input_mode == InputMode::None
+            && self.initial_board_fetched
+            && self.api_client.get_auth_cookie_preview().is_some()
+        {
             if let Some(last_refresh) = self.last_board_refresh {
                 if last_refresh.elapsed() >= Duration::from_secs(10) {
                     should_refresh_board = true;
                 }
             }
-        }
-
-        if !self.initial_board_fetched {
-            self.initial_board_fetched = true;
-            self.status_message = "Fetching initial board state...".to_string();
-            self.fetch_board_data().await;
-            return Ok(());
         }
 
         if should_refresh_board {
@@ -36,6 +32,126 @@ impl App {
                 Event::Key(key_event) => {
                     if key_event.kind == KeyEventKind::Press {
                         match self.input_mode {
+                            InputMode::EnterBaseUrl => {
+                                match key_event.code {
+                                    KeyCode::Up => {
+                                        if self.base_url_selection_index > 0 {
+                                            self.base_url_selection_index -= 1;
+                                        }
+                                    }
+                                    KeyCode::Down => {
+                                        if self.base_url_selection_index
+                                            < self.base_url_options.len() - 1
+                                        {
+                                            self.base_url_selection_index += 1;
+                                        }
+                                    }
+                                    KeyCode::Enter => {
+                                        let selected_option =
+                                            &self.base_url_options[self.base_url_selection_index];
+                                        if selected_option == "Custom" {
+                                            self.input_mode = InputMode::EnterCustomBaseUrlText;
+                                            self.status_message =
+                                                "Enter Custom API Base URL:".to_string();
+                                            self.input_buffer.clear();
+                                        } else {
+                                            self.api_client.set_base_url(selected_option.clone());
+                                            self.input_mode = InputMode::EnterAccessToken;
+                                            self.status_message = "Base URL set. Enter Access Token (or Enter to skip):".to_string();
+                                            self.input_buffer.clear();
+                                        }
+                                    }
+                                    KeyCode::Char('q') => self.exit = true,
+                                    _ => {}
+                                }
+                            }
+                            InputMode::EnterCustomBaseUrlText => {
+                                match key_event.code {
+                                    KeyCode::Enter => {
+                                        let url = self.input_buffer.trim().to_string();
+                                        if url.is_empty()
+                                            || !(url.starts_with("http://")
+                                                || url.starts_with("https://"))
+                                        {
+                                            self.status_message = "Invalid URL. Must start with http:// or https://. Please re-enter Custom Base URL:".to_string();
+                                            self.input_buffer.clear();
+                                        } else {
+                                            self.api_client.set_base_url(url);
+                                            self.input_mode = InputMode::EnterAccessToken;
+                                            self.status_message = "Base URL set. Enter Access Token (or Enter to skip):".to_string();
+                                            self.input_buffer.clear();
+                                        }
+                                    }
+                                    KeyCode::Esc => {
+                                        self.input_mode = InputMode::EnterBaseUrl;
+                                        self.status_message =
+                                            "Custom URL input cancelled. Select API Base URL:"
+                                                .to_string();
+                                        self.input_buffer.clear();
+                                    }
+                                    KeyCode::Char(to_insert) => self.input_buffer.push(to_insert),
+                                    KeyCode::Backspace => {
+                                        self.input_buffer.pop();
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            InputMode::EnterAccessToken => match key_event.code {
+                                KeyCode::Enter => {
+                                    let token = self.input_buffer.trim().to_string();
+                                    let current_refresh = self.api_client.get_refresh_token_clone();
+                                    if !token.is_empty() {
+                                        self.api_client.set_tokens(Some(token), current_refresh);
+                                        self.status_message = "Access Token set. Enter Refresh Token (or Enter to skip):".to_string();
+                                    } else {
+                                        self.api_client.set_tokens(None, current_refresh);
+                                        self.status_message = "Access Token skipped. Enter Refresh Token (or Enter to skip):".to_string();
+                                    }
+                                    self.input_mode = InputMode::EnterRefreshToken;
+                                    self.input_buffer.clear();
+                                }
+                                KeyCode::Esc => {
+                                    self.input_mode = InputMode::EnterBaseUrl;
+                                    self.status_message =
+                                        "Token input cancelled. Select API Base URL:".to_string();
+                                    self.input_buffer.clear();
+                                }
+                                KeyCode::Char(to_insert) => self.input_buffer.push(to_insert),
+                                KeyCode::Backspace => {
+                                    self.input_buffer.pop();
+                                }
+                                _ => {}
+                            },
+                            InputMode::EnterRefreshToken => match key_event.code {
+                                KeyCode::Enter => {
+                                    let refresh = self.input_buffer.trim().to_string();
+                                    let current_access = self.api_client.get_access_token_clone();
+                                    if !refresh.is_empty() {
+                                        self.api_client.set_tokens(current_access, Some(refresh));
+                                        self.status_message = "Refresh Token set. Configuration complete. Fetching initial board...".to_string();
+                                    } else {
+                                        self.api_client.set_tokens(current_access, None);
+                                        self.status_message = "Refresh Token skipped. Configuration complete. Fetching initial board...".to_string();
+                                    }
+                                    self.input_mode = InputMode::None;
+                                    self.input_buffer.clear();
+                                    if !self.initial_board_fetched {
+                                        self.fetch_board_data().await;
+                                    }
+                                }
+                                KeyCode::Esc => {
+                                    self.input_mode = InputMode::EnterAccessToken;
+                                    self.status_message =
+                                        "Refresh Token input cancelled. Re-enter Access Token:"
+                                            .to_string();
+                                    self.input_buffer.clear();
+                                }
+                                KeyCode::Char(to_insert) => self.input_buffer.push(to_insert),
+                                KeyCode::Backspace => {
+                                    self.input_buffer.pop();
+                                }
+                                _ => {}
+                            },
                             InputMode::None => {
                                 let mut art_moved = false;
                                 if self.loaded_art.is_some() {
@@ -110,9 +226,9 @@ impl App {
                                         }
                                         KeyCode::Char('q') => self.exit = true,
                                         KeyCode::Char('c') => {
-                                            self.input_mode = InputMode::Cookie;
-                                            self.status_message =
-                                                "Editing cookie. Press Enter to save, Esc to cancel.".to_string();
+                                            self.input_mode = InputMode::EnterAccessToken;
+                                            self.status_message = "Re-enter Access Token (current will be overwritten if new is provided, skip Refresh Token step if not needed):".to_string();
+                                            self.input_buffer.clear();
                                         }
                                         KeyCode::Char('r') => self.fetch_board_data().await,
                                         KeyCode::Char('p') => self.fetch_profile_data().await,
@@ -150,37 +266,6 @@ impl App {
                                     }
                                 }
                             }
-                            InputMode::Cookie => match key_event.code {
-                                KeyCode::Enter => {
-                                    let cookie_to_set = self.cookie_input_buffer.trim().to_string();
-                                    if !cookie_to_set.is_empty() {
-                                        self.api_client.set_cookie(cookie_to_set.clone());
-                                        self.status_message = format!(
-                                            "Cookie set for this session. Length: {}. Press 'p' to get profile.",
-                                            cookie_to_set.len()
-                                        );
-                                    } else {
-                                        self.api_client.clear_cookie();
-                                        self.status_message =
-                                            "Cookie input empty. Cleared for this session."
-                                                .to_string();
-                                    }
-                                    self.input_mode = InputMode::None;
-                                    self.cookie_input_buffer.clear();
-                                }
-                                KeyCode::Esc => {
-                                    self.input_mode = InputMode::None;
-                                    self.status_message = "Cookie input cancelled.".to_string();
-                                    self.cookie_input_buffer.clear();
-                                }
-                                KeyCode::Char(to_insert) => {
-                                    self.cookie_input_buffer.push(to_insert);
-                                }
-                                KeyCode::Backspace => {
-                                    self.cookie_input_buffer.pop();
-                                }
-                                _ => {}
-                            },
                             InputMode::ArtEditor => match key_event.code {
                                 KeyCode::Esc => {
                                     self.input_mode = InputMode::None;
@@ -287,12 +372,15 @@ impl App {
                     }
                 );
                 self.last_board_refresh = Some(Instant::now());
+                if !self.initial_board_fetched {
+                    self.initial_board_fetched = true;
+                }
             }
             Err(e) => {
                 match e {
                     ApiError::Unauthorized => {
-                        self.status_message = "Session expired or cookie invalid. Auto-refresh paused. Provide new cookie via CLI or 'c'.".to_string();
-                        self.api_client.clear_cookie();
+                        self.status_message = "Session expired or cookie invalid. Auto-refresh paused. Enter new tokens or restart.".to_string();
+                        self.api_client.clear_tokens();
                     }
                     _ => {
                         self.status_message =
@@ -307,7 +395,9 @@ impl App {
     async fn fetch_profile_data(&mut self) {
         if self.api_client.get_auth_cookie_preview().is_none() {
             self.status_message =
-                "Cannot fetch profile: Cookie not set. Press 'c' to set cookie.".to_string();
+                "Cannot fetch profile: Access Token not set. Please enter it.".to_string();
+            self.input_mode = InputMode::EnterAccessToken;
+            self.input_buffer.clear();
             return;
         }
         self.status_message = "Fetching profile data...".to_string();
@@ -327,7 +417,7 @@ impl App {
                 self.user_info = None;
                 match e {
                     ApiError::Unauthorized => {
-                        self.status_message = "Error fetching profile: Unauthorized. Cookie might be invalid or expired. Try 'c' to update.".to_string();
+                        self.status_message = "Error fetching profile: Unauthorized. Access Token might be invalid or expired. Try 'c' to update.".to_string();
                     }
                     _ => {
                         self.status_message = format!("Error fetching profile: {:?}", e);
@@ -344,7 +434,7 @@ impl App {
         }
         if self.api_client.get_auth_cookie_preview().is_none() {
             self.status_message =
-                "Cannot place pixels: Cookie not set. Press 'c' to set cookie.".to_string();
+                "Cannot place pixels: Access Token not set. Use --access-token CLI arg or 'c' to set token.".to_string();
             return;
         }
 
@@ -414,10 +504,10 @@ impl App {
                             status: reqwest::StatusCode::UNAUTHORIZED,
                             ..
                         } => {
-                            self.api_client.clear_cookie();
+                            self.api_client.clear_tokens();
                             let cleared_message =
-                                "Authentication failed (token expired or invalid). Cookie cleared from app.".to_string();
-                            error_message = format!("{} Please use --cookie argument or restart with a new cookie via CLI. Halting placement.", cleared_message);
+                                "Authentication failed (tokens expired or invalid). Tokens cleared from app.".to_string();
+                            error_message = format!("{} Please use --access-token and --refresh-token arguments or restart with new tokens via CLI. Halting placement.", cleared_message);
                             self.status_message = error_message;
                             return;
                         }

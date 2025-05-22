@@ -1,6 +1,5 @@
 use std::io::{self, stdout};
 
-use clap::Parser;
 use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -15,37 +14,22 @@ mod ui;
 use api_client::ApiClient;
 use app_state::{App, InputMode};
 
-/// FtPlace TUI Client
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Cli {
-    /// API base URL (e.g., http://localhost:7979)
-    #[arg(short, long, env = "FTPLACE_BASE_URL")]
-    base_url: Option<String>,
-
-    /// Session cookie value (token)
-    #[arg(short, long, env = "FTPLACE_COOKIE")]
-    cookie: Option<String>,
-}
-
 impl App {
-    pub fn new(base_url: Option<String>, cookie: Option<String>) -> Self {
-        let api_client = ApiClient::new(base_url, cookie.clone());
-        let initial_status: String;
+    pub fn new() -> Self {
+        let api_client = ApiClient::new(None, None, None);
 
-        if cookie.is_some() {
-            initial_status = "Using provided cookie. Fetching board...".to_string();
-        } else {
-            initial_status =
-                "No cookie provided. Limited functionality. Fetching board...".to_string();
-        }
+        let base_url_options = vec![
+            "https://ftplace.42lausanne.ch".to_string(),
+            "http://localhost:7979".to_string(),
+            "Custom".to_string(),
+        ];
 
         Self {
             exit: false,
             api_client,
-            input_mode: InputMode::None,
-            cookie_input_buffer: String::new(),
-            status_message: initial_status,
+            input_mode: InputMode::EnterBaseUrl,
+            input_buffer: String::new(),
+            status_message: "Select API Base URL or choose Custom:".to_string(),
             board: Vec::new(),
             colors: Vec::new(),
             user_info: None,
@@ -53,6 +37,9 @@ impl App {
             board_viewport_x: 0,
             board_viewport_y: 0,
             initial_board_fetched: false,
+            last_board_refresh: None,
+            base_url_options,
+            base_url_selection_index: 0,
             current_editing_art: None,
             art_editor_cursor_x: 0,
             art_editor_cursor_y: 0,
@@ -62,7 +49,6 @@ impl App {
             art_editor_canvas_height: 20,
             art_editor_viewport_x: 0,
             art_editor_viewport_y: 0,
-            last_board_refresh: None,
         }
     }
 
@@ -77,13 +63,11 @@ impl App {
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let cli = Cli::parse();
-
     enable_raw_mode()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     execute!(stdout(), EnterAlternateScreen)?;
 
-    let mut app = App::new(cli.base_url, cli.cookie);
+    let mut app = App::new();
     let res = app.run(&mut terminal).await;
 
     disable_raw_mode()?;

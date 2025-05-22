@@ -100,8 +100,9 @@ pub enum ApiError {
         error_response: ApiErrorResponse,
     },
     UnexpectedResponse(String),
-    Unauthorized,         // For 401/403 where we don't get an ApiErrorResponse
-    FileLogError(String), // For errors during logging to file
+    Unauthorized,              // For 401/403 where we don't get an ApiErrorResponse
+    FileLogError(String),      // For errors during logging to file
+    TokenRefreshedPleaseRetry, // New variant for 426
 }
 
 impl From<reqwest::Error> for ApiError {
@@ -114,24 +115,62 @@ impl From<reqwest::Error> for ApiError {
 pub struct ApiClient {
     client: reqwest::Client,
     base_url: String,
-    auth_cookie: Option<String>,
+    access_token: Option<String>,
+    refresh_token: Option<String>,
 }
 
 impl ApiClient {
-    pub fn new(base_url: Option<String>, auth_cookie: Option<String>) -> Self {
+    pub fn new(
+        base_url: Option<String>,
+        access_token: Option<String>,
+        refresh_token: Option<String>,
+    ) -> Self {
         ApiClient {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .cookie_store(true)
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             base_url: base_url.unwrap_or_else(|| API_BASE_URL.to_string()),
-            auth_cookie,
+            access_token,
+            refresh_token,
         }
     }
 
-    pub fn set_cookie(&mut self, cookie: String) {
-        self.auth_cookie = Some(cookie);
+    pub fn set_base_url(&mut self, base_url: String) {
+        self.base_url = base_url;
+    }
+
+    pub fn set_tokens(&mut self, access: Option<String>, refresh: Option<String>) {
+        self.access_token = access;
+        self.refresh_token = refresh;
+    }
+
+    // Getter for access token, primarily for use when setting the other token
+    pub fn get_access_token_clone(&self) -> Option<String> {
+        self.access_token.clone()
+    }
+
+    // Getter for refresh token, primarily for use when setting the other token
+    pub fn get_refresh_token_clone(&self) -> Option<String> {
+        self.refresh_token.clone()
+    }
+
+    pub fn get_base_url_preview(&self) -> String {
+        // Return a portion of the base_url or the full thing if short
+        let len = self.base_url.len();
+        let preview_len = 20; // Show a bit more for URLs
+        if len > preview_len {
+            format!(
+                "{}...",
+                self.base_url.chars().take(preview_len).collect::<String>()
+            )
+        } else {
+            self.base_url.clone()
+        }
     }
 
     pub fn get_auth_cookie_preview(&self) -> Option<String> {
-        self.auth_cookie.as_ref().map(|s| {
+        self.access_token.as_ref().map(|s| {
             let len = s.len();
             let preview_len = 10;
             if len > preview_len {
@@ -142,20 +181,21 @@ impl ApiClient {
         })
     }
 
-    pub fn clear_cookie(&mut self) {
-        self.auth_cookie = None;
+    pub fn clear_tokens(&mut self) {
+        self.access_token = None;
+        self.refresh_token = None;
     }
 
     async fn handle_response<T: DeserializeOwned>(
+        &mut self,
         response: reqwest::Response,
     ) -> Result<T, ApiError> {
         let status = response.status();
+        let headers = response.headers().clone(); // Clone headers for later use if needed
 
-        // Always try to get the text first, as .json() consumes the body and we might need the text for errors.
         let response_text = match response.text().await {
             Ok(text) => text,
             Err(text_err) => {
-                // If we can't even get text, it's a fundamental issue with the response.
                 return Err(ApiError::UnexpectedResponse(format!(
                     "Failed to read response text (status {}): {}",
                     status, text_err
@@ -191,6 +231,43 @@ impl ApiClient {
                     )))
                 }
             }
+        } else if status.as_u16() == 426 {
+            // Handle 426 for token refresh
+            let mut new_access_token_found = false;
+            let mut new_refresh_token_found = false;
+            for cookie_str_val in headers.get_all(reqwest::header::SET_COOKIE) {
+                if let Ok(cookie_str) = cookie_str_val.to_str() {
+                    if let Some(token_part) = cookie_str.split(';').next() {
+                        if token_part.trim().starts_with("token=") {
+                            let new_token_val =
+                                token_part.trim().trim_start_matches("token=").to_string();
+                            if !new_token_val.is_empty() {
+                                self.access_token = Some(new_token_val);
+                                new_access_token_found = true;
+                            }
+                        } else if token_part.trim().starts_with("refresh=") {
+                            let new_refresh_val =
+                                token_part.trim().trim_start_matches("refresh=").to_string();
+                            if !new_refresh_val.is_empty() {
+                                self.refresh_token = Some(new_refresh_val);
+                                new_refresh_token_found = true;
+                            }
+                        }
+                    }
+                    if new_access_token_found && new_refresh_token_found {
+                        break;
+                    }
+                }
+            }
+            if new_access_token_found {
+                return Err(ApiError::TokenRefreshedPleaseRetry);
+            } else {
+                // If 426 but no new token found in Set-Cookie, treat as unexpected or error
+                return Err(ApiError::UnexpectedResponse(format!(
+                    "Received 426 but no new token found in Set-Cookie. Response body: \"{}\"",
+                    response_text
+                )));
+            }
         } else {
             // Try to parse the collected text as our specific ApiErrorResponse struct for known API errors
             match serde_json::from_str::<ApiErrorResponse>(&response_text) {
@@ -215,60 +292,99 @@ impl ApiClient {
         }
     }
 
-    pub async fn get_board(&self) -> Result<BoardGetResponse, ApiError> {
-        let url = format!("{}/api/get", self.base_url);
-        let mut request_builder = self.client.get(&url);
-
-        if let Some(token_value) = &self.auth_cookie {
-            let cookie_header_value = format!("token={}", token_value);
-            request_builder = request_builder.header(COOKIE, cookie_header_value);
+    // Helper to build and send request, to be used by retry logic
+    async fn send_request_with_retry<F, Fut, T>(
+        &mut self,
+        build_request_fn: F,
+    ) -> Result<T, ApiError>
+    where
+        F: Fn(&mut Self) -> Fut,
+        Fut: std::future::Future<Output = Result<reqwest::Response, reqwest::Error>>,
+        T: DeserializeOwned,
+    {
+        let response = build_request_fn(self).await?;
+        match self.handle_response(response).await {
+            Ok(data) => Ok(data),
+            Err(ApiError::TokenRefreshedPleaseRetry) => {
+                // Token was refreshed, try the request again
+                let response_retry = build_request_fn(self).await?;
+                self.handle_response(response_retry).await
+            }
+            Err(e) => Err(e), // Other errors
         }
-
-        let response = request_builder.send().await?;
-        Self::handle_response(response).await
     }
 
-    pub async fn get_profile(&self) -> Result<ProfileGetResponse, ApiError> {
-        let url = format!("{}/api/profile", self.base_url);
-        let mut request_builder = self
-            .client
-            .get(&url)
-            .header(reqwest::header::ACCEPT, "application/json");
+    pub async fn get_board(&mut self) -> Result<BoardGetResponse, ApiError> {
+        self.send_request_with_retry(|s| {
+            let url = format!("{}/api/get", s.base_url);
+            let mut request_builder = s.client.get(&url);
+            let mut cookie_parts = Vec::new();
+            if let Some(token) = &s.access_token {
+                cookie_parts.push(format!("token={}", token));
+            }
+            if let Some(refresh) = &s.refresh_token {
+                cookie_parts.push(format!("refresh={}", refresh));
+            }
+            if !cookie_parts.is_empty() {
+                request_builder = request_builder.header(COOKIE, cookie_parts.join("; "));
+            }
+            async move { request_builder.send().await }
+        })
+        .await
+    }
 
-        if let Some(token_value) = &self.auth_cookie {
-            let cookie_header_value = format!("token={}", token_value);
-            request_builder = request_builder.header(COOKIE, cookie_header_value);
-        }
-
-        let response = request_builder.send().await?;
-        Self::handle_response(response).await
+    pub async fn get_profile(&mut self) -> Result<ProfileGetResponse, ApiError> {
+        self.send_request_with_retry(|s| {
+            let url = format!("{}/api/profile", s.base_url);
+            let mut request_builder = s
+                .client
+                .get(&url)
+                .header(reqwest::header::ACCEPT, "application/json");
+            let mut cookie_parts = Vec::new();
+            if let Some(token) = &s.access_token {
+                cookie_parts.push(format!("token={}", token));
+            }
+            if let Some(refresh) = &s.refresh_token {
+                cookie_parts.push(format!("refresh={}", refresh));
+            }
+            if !cookie_parts.is_empty() {
+                request_builder = request_builder.header(COOKIE, cookie_parts.join("; "));
+            }
+            async move { request_builder.send().await }
+        })
+        .await
     }
 
     pub async fn place_pixel(
-        &self,
+        &mut self,
         x: i32,
         y: i32,
         color_id: i32,
     ) -> Result<PixelSetResponse, ApiError> {
-        let url = format!("{}/api/set", self.base_url);
-        let mut request_builder = self.client.post(&url);
-
-        if let Some(token_value) = &self.auth_cookie {
-            let cookie_header_value = format!("token={}", token_value);
-            request_builder = request_builder.header(COOKIE, cookie_header_value);
-        }
-
-        let body = serde_json::json!({
-            "x": x,
-            "y": y,
-            "color": color_id // Backend expects "color" for color_id
-        });
-
-        request_builder = request_builder
-            .header(CONTENT_TYPE, "application/json")
-            .json(&body);
-        let response = request_builder.send().await?;
-        Self::handle_response(response).await
+        self.send_request_with_retry(|s| {
+            let url = format!("{}/api/set", s.base_url);
+            let mut request_builder = s.client.post(&url);
+            let mut cookie_parts = Vec::new();
+            if let Some(token) = &s.access_token {
+                cookie_parts.push(format!("token={}", token));
+            }
+            if let Some(refresh) = &s.refresh_token {
+                cookie_parts.push(format!("refresh={}", refresh));
+            }
+            if !cookie_parts.is_empty() {
+                request_builder = request_builder.header(COOKIE, cookie_parts.join("; "));
+            }
+            let body = serde_json::json!({
+                "x": x,
+                "y": y,
+                "color": color_id
+            });
+            request_builder = request_builder
+                .header(CONTENT_TYPE, "application/json")
+                .json(&body);
+            async move { request_builder.send().await }
+        })
+        .await
     }
 }
 

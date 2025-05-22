@@ -6,9 +6,12 @@ use std::time::Instant;
 pub enum InputMode {
     #[default]
     None,
-    Cookie,
-    ArtEditor,         // New mode for creating/editing pixel art
-    ArtEditorFileName, // New mode for entering filename for saving art
+    EnterBaseUrl,           // Will now involve selection or custom input
+    EnterCustomBaseUrlText, // New sub-mode for when "Custom" URL is chosen
+    EnterAccessToken,       // Renamed from Cookie
+    EnterRefreshToken,      // New
+    ArtEditor,              // New mode for creating/editing pixel art
+    ArtEditorFileName,      // New mode for entering filename for saving art
 }
 
 #[derive(Debug)]
@@ -16,7 +19,7 @@ pub struct App {
     pub exit: bool,
     pub api_client: ApiClient,
     pub input_mode: InputMode,
-    pub cookie_input_buffer: String,
+    pub input_buffer: String, // Generic input buffer (renamed from cookie_input_buffer for clarity)
     pub status_message: String, // To display messages to the user
     pub board: Vec<Vec<Option<PixelNetwork>>>,
     pub colors: Vec<ColorInfo>,
@@ -26,6 +29,10 @@ pub struct App {
     pub board_viewport_y: u16,       // Y offset of the viewport in pixel rows (top row of the pair)
     pub initial_board_fetched: bool, // New flag
     pub last_board_refresh: Option<Instant>, // For auto-refresh
+
+    // State for Base URL selection
+    pub base_url_options: Vec<String>,
+    pub base_url_selection_index: usize,
 
     // Pixel Art Editor State
     pub current_editing_art: Option<PixelArt>, // Holds the art being created/edited
