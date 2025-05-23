@@ -89,6 +89,7 @@ impl App {
             art_editor_cursor_x: 0,
             art_editor_cursor_y: 0,
             art_editor_selected_color_id: 1,
+            art_editor_color_palette_index: 0,
             art_editor_filename_buffer: String::new(),
             art_editor_canvas_width: 30,
             art_editor_canvas_height: 20,

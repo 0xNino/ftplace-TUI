@@ -44,6 +44,7 @@ pub struct App {
     pub art_editor_cursor_x: i32,              // Cursor X position on the art canvas
     pub art_editor_cursor_y: i32,              // Cursor Y position on the art canvas
     pub art_editor_selected_color_id: i32,     // Currently selected color_id for drawing
+    pub art_editor_color_palette_index: usize, // Index in the colors array for palette navigation
     pub art_editor_filename_buffer: String,    // Buffer for filename input
     pub art_editor_canvas_width: u16,          // Width of the art editor canvas
     pub art_editor_canvas_height: u16,         // Height of the art editor canvas

@@ -271,8 +271,22 @@ impl App {
                                                 self.art_editor_cursor_y = 0;
                                                 self.art_editor_selected_color_id = 1;
                                             }
+
+                                            // Sync color palette index with selected color
+                                            if let Some(index) = self.colors.iter().position(|c| {
+                                                c.id == self.art_editor_selected_color_id
+                                            }) {
+                                                self.art_editor_color_palette_index = index;
+                                            } else {
+                                                self.art_editor_color_palette_index = 0;
+                                                if let Some(first_color) = self.colors.first() {
+                                                    self.art_editor_selected_color_id =
+                                                        first_color.id;
+                                                }
+                                            }
+
                                             self.status_message = format!(
-                                                "Entered Pixel Art Editor. Canvas: {}x{}. Arrows to move, Space to draw, s to save.",
+                                                "Entered Pixel Art Editor. Canvas: {}x{}. Arrows to move, Space to draw, Tab to change colors, s to save.",
                                                 self.art_editor_canvas_width, self.art_editor_canvas_height
                                             );
                                         }
@@ -344,6 +358,53 @@ impl App {
                                         self.status_message = "Enter filename to save art (e.g., my_art.json). Press Enter to save, Esc to cancel.".to_string();
                                     } else {
                                         self.status_message = "No art to save.".to_string();
+                                    }
+                                }
+                                KeyCode::Tab => {
+                                    // Navigate to next color in palette
+                                    if !self.colors.is_empty() {
+                                        self.art_editor_color_palette_index =
+                                            (self.art_editor_color_palette_index + 1)
+                                                % self.colors.len();
+
+                                        // Update selected color to match palette index
+                                        if let Some(color) =
+                                            self.colors.get(self.art_editor_color_palette_index)
+                                        {
+                                            self.art_editor_selected_color_id = color.id;
+                                            let color_name = if color.name.trim().is_empty() {
+                                                format!("Color {}", color.id)
+                                            } else {
+                                                color.name.clone()
+                                            };
+                                            self.status_message =
+                                                format!("Selected color: {}", color_name);
+                                        }
+                                    }
+                                }
+                                KeyCode::BackTab => {
+                                    // Navigate to previous color in palette
+                                    if !self.colors.is_empty() {
+                                        self.art_editor_color_palette_index =
+                                            if self.art_editor_color_palette_index == 0 {
+                                                self.colors.len() - 1
+                                            } else {
+                                                self.art_editor_color_palette_index - 1
+                                            };
+
+                                        // Update selected color to match palette index
+                                        if let Some(color) =
+                                            self.colors.get(self.art_editor_color_palette_index)
+                                        {
+                                            self.art_editor_selected_color_id = color.id;
+                                            let color_name = if color.name.trim().is_empty() {
+                                                format!("Color {}", color.id)
+                                            } else {
+                                                color.name.clone()
+                                            };
+                                            self.status_message =
+                                                format!("Selected color: {}", color_name);
+                                        }
                                     }
                                 }
                                 KeyCode::Backspace => {

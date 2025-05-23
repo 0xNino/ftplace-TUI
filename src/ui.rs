@@ -250,15 +250,16 @@ pub fn render_art_editor_ui(app: &mut App, frame: &mut Frame, area: Rect) {
     let canvas_area = editor_layout[0];
     let palette_area = editor_layout[1];
 
+    let selected_color_name = get_color_name(app, app.art_editor_selected_color_id);
     let editor_block = Block::default()
         .borders(Borders::ALL)
         .title(format!(
-            "Pixel Art Editor (Canvas: {}x{}, Cursor: {},{}, Color: {}) - Arrows, Space, s:Save, Esc:Exit",
+            "Pixel Art Editor (Canvas: {}x{}, Cursor: {},{}, Color: {}) - Arrows, Space, Tab, s:Save, Esc:Exit",
             app.art_editor_canvas_width,
             app.art_editor_canvas_height,
             app.art_editor_cursor_x,
             app.art_editor_cursor_y,
-            app.art_editor_selected_color_id
+            selected_color_name
         ));
     frame.render_widget(editor_block.clone(), canvas_area); // Clone for the title, draw border over full area
 
@@ -337,22 +338,18 @@ pub fn render_art_editor_ui(app: &mut App, frame: &mut Frame, area: Rect) {
                 if app.art_editor_cursor_x < app.art_editor_canvas_width as i32
                     && app.art_editor_cursor_y < app.art_editor_canvas_height as i32
                 {
+                    // Get the selected color for cursor preview
+                    let cursor_color =
+                        get_ratatui_color(app, app.art_editor_selected_color_id, Color::Yellow);
+
                     if art_px_y_top == app.art_editor_cursor_y {
                         // Cursor is on the top art pixel of this cell
-                        // If the original top_pixel_color was the default DarkGray (empty),
-                        // make the yellow more prominent. Otherwise, blend with existing color.
-                        if top_pixel_color == Color::DarkGray {
-                            cell_style = Style::default().fg(Color::Yellow).bg(bottom_pixel_color);
-                        } else {
-                            cell_style = cell_style.fg(Color::Yellow); // Highlight by changing foreground
-                        }
+                        // Show the selected color that would be placed
+                        cell_style = Style::default().fg(cursor_color).bg(bottom_pixel_color);
                     } else if art_px_y_bottom == app.art_editor_cursor_y {
                         // Cursor is on the bottom art pixel of this cell
-                        if bottom_pixel_color == Color::DarkGray {
-                            cell_style = Style::default().fg(top_pixel_color).bg(Color::Yellow);
-                        } else {
-                            cell_style = cell_style.bg(Color::Yellow); // Highlight by changing background
-                        }
+                        // Show the selected color that would be placed
+                        cell_style = Style::default().fg(top_pixel_color).bg(cursor_color);
                     }
                 }
             }
@@ -365,30 +362,8 @@ pub fn render_art_editor_ui(app: &mut App, frame: &mut Frame, area: Rect) {
         }
     }
 
-    // Placeholder for Color Palette
-    let palette_block = Block::default()
-        .borders(Borders::ALL)
-        .title("Colors (TODO)");
-    frame.render_widget(palette_block, palette_area);
-    let colors_text = app
-        .colors
-        .iter()
-        .map(|c| {
-            format!(
-                "ID {}: RGB({},{},{})
-",
-                c.id, c.red, c.green, c.blue
-            )
-        })
-        .collect::<String>();
-    let palette_content = Paragraph::new(colors_text).wrap(Wrap { trim: true });
-    frame.render_widget(
-        palette_content,
-        palette_area.inner(Margin {
-            vertical: 1,
-            horizontal: 1,
-        }),
-    );
+    // Interactive Color Palette with Names
+    render_color_palette(app, frame, palette_area);
 
     // If in filename input mode, render that input field over the palette or status bar
     if app.input_mode == InputMode::ArtEditorFileName {
@@ -410,6 +385,99 @@ pub fn render_art_editor_ui(app: &mut App, frame: &mut Frame, area: Rect) {
             filename_input_area.y + 1,
         );
     }
+}
+
+/// Render an interactive color palette with named colors
+fn render_color_palette(app: &App, frame: &mut Frame, area: Rect) {
+    if app.colors.is_empty() {
+        let empty_palette = Paragraph::new("No colors available").block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Color Palette"),
+        );
+        frame.render_widget(empty_palette, area);
+        return;
+    }
+
+    let palette_block = Block::default()
+        .borders(Borders::ALL)
+        .title("Color Palette (Tab/Shift+Tab to navigate)");
+    frame.render_widget(palette_block.clone(), area);
+
+    let inner_area = area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+
+    // Create color list items with names and visual indicators
+    let color_items: Vec<ListItem> = app
+        .colors
+        .iter()
+        .enumerate()
+        .map(|(idx, color)| {
+            let color_name = if color.name.trim().is_empty() {
+                format!("Color {}", color.id)
+            } else {
+                color.name.clone()
+            };
+
+            let is_selected = app.art_editor_selected_color_id == color.id;
+            let is_highlighted = idx == app.art_editor_color_palette_index;
+
+            // Create visual representation with color block and name
+            let color_display = format!("█ {} (ID: {})", color_name, color.id);
+
+            let mut spans = vec![
+                Span::styled(
+                    "█ ",
+                    Style::default().fg(Color::Rgb(color.red, color.green, color.blue)),
+                ),
+                Span::styled(
+                    color_name.clone(),
+                    if is_selected {
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::Gray)
+                    },
+                ),
+                Span::styled(
+                    format!(" (ID: {})", color.id),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ];
+
+            if is_selected {
+                spans.insert(
+                    0,
+                    Span::styled(
+                        "→ ",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                );
+            } else {
+                spans.insert(0, Span::styled("  ", Style::default()));
+            }
+
+            ListItem::new(Line::from(spans))
+        })
+        .collect();
+
+    let color_list = List::new(color_items)
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▶ ");
+
+    let mut list_state = ListState::default();
+    list_state.select(Some(app.art_editor_color_palette_index));
+
+    frame.render_stateful_widget(color_list, inner_area, &mut list_state);
 }
 
 /// helper function to create a centered rect using up certain percentage of the available rect `r`
@@ -442,6 +510,20 @@ pub fn get_ratatui_color(app: &App, color_id: i32, default_fallback_color: Color
         })
 }
 
+pub fn get_color_name(app: &App, color_id: i32) -> String {
+    app.colors
+        .iter()
+        .find(|c| c.id == color_id)
+        .map(|color_info| {
+            if color_info.name.trim().is_empty() {
+                format!("Color {}", color_id)
+            } else {
+                color_info.name.clone()
+            }
+        })
+        .unwrap_or_else(|| format!("Unknown Color {}", color_id))
+}
+
 fn render_help_popup(app: &App, frame: &mut Frame) {
     let popup_area = centered_rect(60, 50, frame.size()); // Adjust size as needed
 
@@ -472,6 +554,7 @@ fn render_help_popup(app: &App, frame: &mut Frame) {
         )),
         Line::from(" Arrows: Move cursor on canvas"),
         Line::from(" Space: Draw pixel with selected color"),
+        Line::from(" Tab/Shift+Tab: Navigate color palette"),
         Line::from(" s: Save current art to file (prompts for name)"),
         Line::from(" Esc: Exit editor (changes not saved automatically)"),
         Line::from(""),
