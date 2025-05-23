@@ -133,7 +133,7 @@ impl App {
                                         self.api_client.set_tokens(current_access, None);
                                         self.status_message = "Refresh Token skipped. Configuration complete. Fetching initial board...".to_string();
                                     }
-                                    self.input_mode = InputMode::None;
+                                    self.input_mode = InputMode::ShowHelp;
                                     self.input_buffer.clear();
                                     if !self.initial_board_fetched {
                                         self.fetch_board_data().await;
@@ -262,6 +262,12 @@ impl App {
                                                 self.art_editor_canvas_width, self.art_editor_canvas_height
                                             );
                                         }
+                                        KeyCode::Char('?') => {
+                                            self.input_mode = InputMode::ShowHelp;
+                                            self.status_message =
+                                                "Showing help. Press Esc or q to close."
+                                                    .to_string();
+                                        }
                                         _ => {}
                                     }
                                 }
@@ -320,6 +326,9 @@ impl App {
                                         self.status_message = "No art to save.".to_string();
                                     }
                                 }
+                                KeyCode::Backspace => {
+                                    self.art_editor_filename_buffer.pop();
+                                }
                                 _ => {}
                             },
                             InputMode::ArtEditorFileName => match key_event.code {
@@ -343,6 +352,13 @@ impl App {
                                 }
                                 KeyCode::Backspace => {
                                     self.art_editor_filename_buffer.pop();
+                                }
+                                _ => {}
+                            },
+                            InputMode::ShowHelp => match key_event.code {
+                                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
+                                    self.input_mode = InputMode::None; // Or store and revert to previous mode
+                                    self.status_message = "Help closed.".to_string();
                                 }
                                 _ => {}
                             },

@@ -12,6 +12,7 @@ pub enum InputMode {
     EnterRefreshToken,      // New
     ArtEditor,              // New mode for creating/editing pixel art
     ArtEditorFileName,      // New mode for entering filename for saving art
+    ShowHelp,               // New mode for displaying available commands
 }
 
 #[derive(Debug)]

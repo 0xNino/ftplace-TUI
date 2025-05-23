@@ -225,6 +225,11 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
 
     // Cursor handling is now within specific input mode rendering logic above for text input
     // or handled by ListState for selection.
+
+    // If ShowHelp mode is active, render the help popup on top of everything else
+    if app.input_mode == InputMode::ShowHelp {
+        render_help_popup(app, frame);
+    }
 }
 
 pub fn render_art_editor_ui(app: &mut App, frame: &mut Frame, area: Rect) {
@@ -429,4 +434,57 @@ pub fn get_ratatui_color(app: &App, color_id: i32, default_fallback_color: Color
         .map_or(default_fallback_color, |color_info| {
             Color::Rgb(color_info.red, color_info.green, color_info.blue)
         })
+}
+
+fn render_help_popup(app: &App, frame: &mut Frame) {
+    let popup_area = centered_rect(60, 50, frame.size()); // Adjust size as needed
+
+    let help_text = vec![
+        Line::from(Span::styled(
+            "--- General ---",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(" q: Quit application"),
+        Line::from(" ?: Toggle this help screen"),
+        Line::from(" c: Configure/Re-enter Access Token"),
+        Line::from(" r: Refresh board data"),
+        Line::from(" p: Fetch profile data"),
+        Line::from(" Arrows: Scroll board viewport"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "--- Pixel Art Placement ---",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(" l: Load default art (shows art controls)"),
+        Line::from(" Arrows: Move loaded art on board"),
+        Line::from(" Enter: Place loaded art at current position"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "--- Pixel Art Editor (enter with 'e') ---",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(" Arrows: Move cursor on canvas"),
+        Line::from(" Space: Draw pixel with selected color"),
+        Line::from(" s: Save current art to file (prompts for name)"),
+        Line::from(" Esc: Exit editor (changes not saved automatically)"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "--- Input Fields (Tokens, Filenames, etc.) ---",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(" Enter: Confirm input"),
+        Line::from(" Esc: Cancel input / Go back"),
+        Line::from(" Backspace: Delete last character"),
+    ];
+
+    let help_paragraph = Paragraph::new(help_text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Help - Available Commands (Press Esc, q, or ? to close)"),
+        )
+        .wrap(Wrap { trim: false }); // trim: false to keep blank lines for spacing
+
+    frame.render_widget(Clear, popup_area); // Clear the area under the popup
+    frame.render_widget(help_paragraph, popup_area);
 }
