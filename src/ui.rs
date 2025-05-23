@@ -230,6 +230,11 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
     if app.input_mode == InputMode::ShowHelp {
         render_help_popup(app, frame);
     }
+
+    // If ShowProfile mode is active, render the profile popup on top of everything else
+    if app.input_mode == InputMode::ShowProfile {
+        render_profile_popup(app, frame);
+    }
 }
 
 pub fn render_art_editor_ui(app: &mut App, frame: &mut Frame, area: Rect) {
@@ -449,6 +454,7 @@ fn render_help_popup(app: &App, frame: &mut Frame) {
         Line::from(" c: Configure/Re-enter Access Token"),
         Line::from(" r: Refresh board data"),
         Line::from(" p: Fetch profile data"),
+        Line::from(" i: Show user profile panel"),
         Line::from(" Arrows: Scroll board viewport"),
         Line::from(""),
         Line::from(Span::styled(
@@ -487,4 +493,231 @@ fn render_help_popup(app: &App, frame: &mut Frame) {
 
     frame.render_widget(Clear, popup_area); // Clear the area under the popup
     frame.render_widget(help_paragraph, popup_area);
+}
+
+fn render_profile_popup(app: &App, frame: &mut Frame) {
+    let popup_area = centered_rect(70, 60, frame.size());
+
+    let profile_text = if let Some(user_info) = &app.user_info {
+        let mut lines = vec![
+            Line::from(Span::styled(
+                "--- User Profile ---",
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::Cyan),
+            )),
+            Line::from(""),
+        ];
+
+        // User basic info
+        if let Some(username) = &user_info.username {
+            lines.push(Line::from(vec![
+                Span::styled("Username: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(username, Style::default().fg(Color::Green)),
+            ]));
+        }
+
+        if let Some(id) = user_info.id {
+            lines.push(Line::from(vec![
+                Span::styled("User ID: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(id.to_string(), Style::default().fg(Color::Yellow)),
+            ]));
+        }
+
+        if let Some(campus_name) = &user_info.campus_name {
+            lines.push(Line::from(vec![
+                Span::styled("Campus: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(campus_name, Style::default().fg(Color::Magenta)),
+            ]));
+        }
+
+        lines.push(Line::from(""));
+
+        // Stats section
+        lines.push(Line::from(Span::styled(
+            "--- Statistics ---",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )));
+
+        if let Some(num) = user_info.num {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "Total Pixels Placed: ",
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(num.to_string(), Style::default().fg(Color::Green)),
+            ]));
+        }
+
+        if let Some(min_px) = user_info.min_px {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "Min Pixels Required: ",
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(min_px.to_string(), Style::default().fg(Color::Yellow)),
+            ]));
+        }
+
+        lines.push(Line::from(vec![
+            Span::styled(
+                "Pixel Buffer: ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                user_info.pixel_buffer.to_string(),
+                Style::default().fg(Color::Blue),
+            ),
+        ]));
+
+        lines.push(Line::from(vec![
+            Span::styled(
+                "Pixel Timer: ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{}ms", user_info.pixel_timer),
+                Style::default().fg(Color::Cyan),
+            ),
+        ]));
+
+        lines.push(Line::from(""));
+
+        // Permissions section
+        lines.push(Line::from(Span::styled(
+            "--- Permissions ---",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )));
+
+        if let Some(is_admin) = user_info.soft_is_admin {
+            let status = if is_admin { "Yes" } else { "No" };
+            let color = if is_admin { Color::Red } else { Color::Gray };
+            lines.push(Line::from(vec![
+                Span::styled("Admin: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(status, Style::default().fg(color)),
+            ]));
+        }
+
+        if let Some(is_banned) = user_info.soft_is_banned {
+            let status = if is_banned { "Yes" } else { "No" };
+            let color = if is_banned { Color::Red } else { Color::Green };
+            lines.push(Line::from(vec![
+                Span::styled("Banned: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(status, Style::default().fg(color)),
+            ]));
+        }
+
+        lines.push(Line::from(""));
+
+        // JWT info section if available
+        if user_info.iat.is_some() || user_info.exp.is_some() {
+            lines.push(Line::from(Span::styled(
+                "--- Token Info ---",
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::Cyan),
+            )));
+
+            if let Some(iat) = user_info.iat {
+                let iat_time = chrono::DateTime::from_timestamp_millis(iat)
+                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                    .unwrap_or_else(|| "Invalid timestamp".to_string());
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "Token Issued: ",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(iat_time, Style::default().fg(Color::Gray)),
+                ]));
+            }
+
+            if let Some(exp) = user_info.exp {
+                let exp_time = chrono::DateTime::from_timestamp_millis(exp)
+                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                    .unwrap_or_else(|| "Invalid timestamp".to_string());
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "Token Expires: ",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(exp_time, Style::default().fg(Color::Gray)),
+                ]));
+            }
+
+            lines.push(Line::from(""));
+        }
+
+        // Timers section if available
+        if let Some(timers) = &user_info.timers {
+            if !timers.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "--- Active Timers ---",
+                    Style::default()
+                        .add_modifier(Modifier::BOLD)
+                        .fg(Color::Cyan),
+                )));
+
+                for (i, timer) in timers.iter().enumerate() {
+                    let timer_time = chrono::DateTime::from_timestamp_millis(*timer)
+                        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                        .unwrap_or_else(|| "Invalid timestamp".to_string());
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("Timer {}: ", i + 1),
+                            Style::default().add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(timer_time, Style::default().fg(Color::Yellow)),
+                    ]));
+                }
+                lines.push(Line::from(""));
+            }
+        }
+
+        lines.push(Line::from(Span::styled(
+            "Press Esc, q, or i to close",
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+
+        lines
+    } else {
+        vec![
+            Line::from(Span::styled(
+                "--- User Profile ---",
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::Cyan),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "No user profile data available.",
+                Style::default().fg(Color::Red),
+            )),
+            Line::from(""),
+            Line::from("Please fetch profile data first with 'p' key."),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Press Esc, q, or i to close",
+                Style::default()
+                    .fg(Color::Gray)
+                    .add_modifier(Modifier::ITALIC),
+            )),
+        ]
+    };
+
+    let profile_paragraph = Paragraph::new(profile_text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("User Profile (Press Esc, q, or i to close)"),
+        )
+        .wrap(Wrap { trim: false });
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(profile_paragraph, popup_area);
 }

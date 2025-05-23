@@ -1,0 +1,136 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# TODO: Features to Implement (Reduce Linter Warnings)
+
+This document lists features that can be implemented to reduce unused variable warnings while adding valuable functionality to the ftplace TUI application.
+
+## High Priority Features
+
+### 1. User Profile Display Panel
+**Files to modify:** [ui.rs](mdc:ftplace-TUI/src/ui.rs), [app_state.rs](mdc:ftplace-TUI/src/app_state.rs)
+**Unused variables to utilize:** 
+- `UserInfos` fields: `id`, `username`, `campus_name`, `num`, `min_px`, `soft_is_admin`, `soft_is_banned`
+
+**Implementation:**
+- Add profile sidebar/popup to main UI
+- Show user stats, admin status, campus info
+- Display pixel placement statistics
+
+### 2. Real-time WebSocket Updates
+**Files to modify:** [main.rs](mdc:ftplace-TUI/src/main.rs), [event_handler.rs](mdc:ftplace-TUI/src/event_handler.rs), [api_client.rs](mdc:ftplace-TUI/src/api_client.rs)
+**Backend endpoints:** WebSocket at `/` with `updates`, `connecteds`, `ping` message types
+
+**Implementation:**
+- Connect to WebSocket for live pixel updates
+- Show real-time pixel placements
+- Display connected users count
+- Auto-update board without manual refresh
+
+### 3. Enhanced Error Display with Timers
+**Files to modify:** [ui.rs](mdc:ftplace-TUI/src/ui.rs), [api_client.rs](mdc:ftplace-TUI/src/api_client.rs)
+**Unused variables to utilize:**
+- `ApiErrorResponse` fields: `timers`, `interval`
+
+**Implementation:**
+- Show cooldown timers in error messages
+- Display retry intervals with countdown
+- Better UX for rate limiting errors
+
+## Medium Priority Features
+
+### 4. Pixel Activity Log
+**Files to modify:** [ui.rs](mdc:ftplace-TUI/src/ui.rs), [app_state.rs](mdc:ftplace-TUI/src/app_state.rs)
+**Unused variables to utilize:**
+- `PixelUpdate` fields: `c`, `u`, `t`, `x`, `y`, `p` (campus), `f` (country flag)
+- `PixelSetResponse.timers`
+
+**Implementation:**
+- Show recent pixel placements with metadata
+- Display usernames, timestamps, locations
+- Include campus and country flag information
+
+### 5. Color Palette with Names
+**Files to modify:** [ui.rs](mdc:ftplace-TUI/src/ui.rs), [art.rs](mdc:ftplace-TUI/src/art.rs)
+**Unused variables to utilize:**
+- `ColorInfo.name` field
+
+**Implementation:**
+- Display color names in palette
+- Improve art editor with named colors
+- Better color selection UX
+
+### 6. Leaderboard System
+**Files to modify:** [ui.rs](mdc:ftplace-TUI/src/ui.rs), [app_state.rs](mdc:ftplace-TUI/src/app_state.rs), [api_client.rs](mdc:ftplace-TUI/src/api_client.rs)
+**Backend endpoint:** `/api/leaderboards`
+
+**Implementation:**
+- Add new leaderboard view mode
+- Show "placed pixels" and "pixels in place" rankings
+- Implement leaderboard API client methods
+
+## Lower Priority Features
+
+### 7. Admin Time Travel View
+**Files to modify:** [ui.rs](mdc:ftplace-TUI/src/ui.rs), [app_state.rs](mdc:ftplace-TUI/src/app_state.rs)
+**Unused variables to utilize:**
+- `BoardGetResponse` fields: `type`, `min_time`, `max_time`
+
+**Implementation:**
+- Time slider for admins to view historical board states
+- Use backend's time-based board viewing
+- Admin-only feature with proper permission checks
+
+### 8. Art Editor Viewport Navigation
+**Files to modify:** [ui.rs](mdc:ftplace-TUI/src/ui.rs), [event_handler.rs](mdc:ftplace-TUI/src/event_handler.rs)
+**Unused variables to utilize:**
+- `App.art_editor_viewport_x`, `App.art_editor_viewport_y`
+
+**Implementation:**
+- Implement panning/scrolling in art editor
+- Navigate around large art canvases
+- Viewport controls for oversized artwork
+
+### 9. My Board Export Feature
+**Files to modify:** [api_client.rs](mdc:ftplace-TUI/src/api_client.rs), [ui.rs](mdc:ftplace-TUI/src/ui.rs)
+**Backend endpoint:** `/api/myboard`
+
+**Implementation:**
+- Download personal pixel contributions as PNG
+- Show personal pixel statistics
+- Export functionality for user's artwork
+
+### 10. Campus/Flag Display Enhancement
+**Files to modify:** [ui.rs](mdc:ftplace-TUI/src/ui.rs)
+**Unused variables to utilize:**
+- `PixelUpdate.p` (campus), `f` (country flag)
+
+**Implementation:**
+- Show campus names in pixel tooltips
+- Display country flags for users
+- Enhanced user identification in UI
+
+## Current Linter Warnings to Address
+
+From [api_client.rs](mdc:ftplace-TUI/src/api_client.rs):
+- `ColorInfo.name` (warning: field is never read)
+- `PixelNetwork.u`, `PixelNetwork.t` (warning: fields are never read)
+- `BoardGetResponse.type`, `min_time`, `max_time` (warning: fields are never read)
+- Multiple `UserInfos` fields (warning: multiple fields are never read)
+- `PixelUpdate` all fields (warning: multiple fields are never read)
+- `PixelSetResponse.update`, `timers` (warning: fields are never read)
+- `ApiErrorResponse.timers`, `interval` (warning: fields are never read)
+
+From [app_state.rs](mdc:ftplace-TUI/src/app_state.rs):
+- `App.art_editor_viewport_x`, `art_editor_viewport_y` (warning: fields are never read)
+
+## Implementation Strategy
+
+1. Start with **User Profile Display Panel** - eliminates most `UserInfos` warnings
+2. Implement **Real-time WebSocket Updates** - high value feature
+3. Add **Enhanced Error Display** - improves UX significantly
+4. Continue with remaining features based on user preference and complexity
+
+Each feature should be implemented incrementally with proper error handling and user feedback.

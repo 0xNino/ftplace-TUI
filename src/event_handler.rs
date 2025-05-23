@@ -268,6 +268,12 @@ impl App {
                                                 "Showing help. Press Esc or q to close."
                                                     .to_string();
                                         }
+                                        KeyCode::Char('i') => {
+                                            self.input_mode = InputMode::ShowProfile;
+                                            self.status_message =
+                                                "Showing user profile. Press Esc, q, or i to close."
+                                                    .to_string();
+                                        }
                                         _ => {}
                                     }
                                 }
@@ -359,6 +365,13 @@ impl App {
                                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
                                     self.input_mode = InputMode::None; // Or store and revert to previous mode
                                     self.status_message = "Help closed.".to_string();
+                                }
+                                _ => {}
+                            },
+                            InputMode::ShowProfile => match key_event.code {
+                                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('i') => {
+                                    self.input_mode = InputMode::None;
+                                    self.status_message = "Profile closed.".to_string();
                                 }
                                 _ => {}
                             },

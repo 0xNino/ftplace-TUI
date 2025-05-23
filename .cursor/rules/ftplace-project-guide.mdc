@@ -1,0 +1,153 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# ftplace-TUI Project Guide
+
+This is a Terminal User Interface (TUI) application for automating pixel placement on ftplace websites (r/place clones). **Target:** https://ftplace.42lausanne.ch/
+
+**⚠️ IMPORTANT: Update this rule whenever project code is modified to keep it accurate with the current implementation status.**
+
+## Backend Context
+
+**Important:** The ftplace backend code is public and available for reference in myplace/ directory. However, **we do not control the production backend** at https://ftplace.42lausanne.ch/ - this is a third-party deployment. The local backend copy is purely for understanding API contracts, data structures, and testing purposes.
+
+## Core Features
+
+- **Pixel Art Creation/Loading:**
+  - Allow users to create simple pixel art directly within the TUI
+  - Allow users to load pixel art from common file formats (e.g., .png, .json, custom format)
+- **Live Board Visualization:**
+  - Display a real-time or near real-time representation of the ftplace board in the terminal
+  - Fetch board state from the `GET /api/get` endpoint
+- **Interactive Pixel Art Placement:**
+  - Overlay the loaded/created pixel art on the TUI board representation
+  - Allow users to move the pixel art overlay using arrow keys
+  - Confirm placement and initiate the automated pixel-placing process
+- **Automated Pixel Placing:**
+  - Iterate through the pixels of the placed art
+  - Send requests to the ftplace backend API (`POST /api/set`) to place each pixel
+- **Authentication Handling:**
+  - Manage session tokens (JWT cookies)
+  - Refresh tokens if necessary (426 responses)
+  - Handle login failures and provide feedback
+- **Cooldown Management:**
+  - Respect API rate limits and pixel cooldown timers
+  - Fetch cooldown status from `/api/profile` or pixel placement responses
+  - Queue pixel placements and retry automatically after cooldowns
+- **User Feedback:**
+  - Display current status (e.g., "Placing pixel at (x,y)", "Cooldown: X seconds remaining")
+  - Show errors from the API
+  - Indicate successful pixel placements
+
+## Tech Stack
+
+- **Language:** Rust
+- **TUI Library:** Ratatui (with crossterm backend)
+- **HTTP Client:** reqwest with tokio async runtime
+- **Serialization:** serde with serde_json
+- **Build System:** Cargo
+- **Linter/Formatter:** Clippy, rustfmt
+
+## Core Architecture
+
+### API Client ([api_client.rs](mdc:ftplace-TUI/ftplace-TUI/ftplace-TUI/ftplace-TUI/src/api_client.rs))
+- Handles authentication via session cookies (JWT tokens)
+- Implements three main endpoints:
+  - `GET /api/get` - Fetch board state and color palette
+  - `POST /api/set` - Place individual pixels 
+  - `GET /api/profile` - Get user info and cooldown timers
+- Manages token refresh (426 responses) and error handling
+- Respects API rate limits and cooldown management
+
+### Key Data Structures
+- `BoardGetResponse`: Contains color palette and 2D pixel board
+- `PixelNetwork`: Individual pixel data (color_id, username, timestamp)
+- `UserInfos`: User profile with timers and pixel buffer info
+- `ApiError`: Comprehensive error handling for network/API issues
+
+## Phase 1 Implementation Status
+
+### ✅ Completed Tasks
+
+**Environment Setup:**
+- ✅ Choose programming language and TUI library (Rust with Ratatui)
+- ✅ Set up project structure (`cargo new ftplace_tui --bin`)
+- ✅ Configure linter (Clippy) and formatter (rustfmt)
+- ✅ Add initial dependencies to `Cargo.toml` (ratatui, tokio, reqwest, serde, crossterm)
+
+**API Client Implementation (`src/api_client.rs`):**
+- ✅ Implement authentication (manual cookie input)
+- ✅ Store and use session cookies in `ApiClient` struct
+- ✅ Implement function to fetch board state (`GET /api/get`)
+- ✅ Response parsing: `colors` array, `board` (2D array of `{c: color_id, u: username, t: set_time}`)
+- ✅ Implement function to place a pixel (`POST /api/set`)
+- ✅ Parameters: `x`, `y`, `color` (color_id)
+- ✅ Handle success and error responses (406, 417, 425, 420, 500)
+- ✅ Parse returned `timers` and updated `userInfos` (pixel_buffer)
+- ✅ Implement function to get user profile/cooldowns (`GET /api/profile`)
+- ✅ Parse `userInfos` for `timers`, `pixel_buffer`, `pixel_timer`
+- ✅ Handle API responses and errors gracefully using `Result` and custom error types
+
+**TUI - Basic Structure:**
+- ✅ Main layout (Cookie input, Board display, Controls, Status areas)
+- ✅ Implement board rendering from fetched API data
+- ✅ Handle basic user input (quitting, submitting cookie)
+
+**Pixel Art Handling (Basic):**
+- ✅ Implement loading predefined pixel art format (JSON structure: `[[x, y, color_id], ...]`)
+- ✅ Display loaded pixel art on the TUI board
+
+**Interactive Placement (Basic):**
+- ✅ Allow moving loaded art on board with arrow keys
+- ✅ "Place" action trigger
+
+**Automated Placer (Basic):**
+- ✅ On "Place", iterate through art pixels and call API to place them
+- ✅ Basic cooldown handling (wait for fixed time if API returns cooldown error)
+
+**User Authentication Flow:**
+- ✅ Prompt for session cookies at startup if not available
+
+### ⚠️ Partially Implemented
+- Cooldown management (basic sleep, not sophisticated)
+
+### ❌ Not Yet Implemented
+- Proper queue management with retry logic
+- Priority-based pixel placement
+- Background processing of pixel queue
+- Advanced cooldown tracking using API timers
+
+## Current Automated Placement
+
+The current implementation uses a simple sequential loop in `place_loaded_art()`:
+- Iterates through pixels one by one
+- Basic cooldown wait using `tokio::time::sleep`
+- Stops entirely on any error
+- No retry or queue persistence
+
+## Development Guidelines
+
+- Use tabs for indentation (biome preference)
+- Handle all API errors gracefully with proper error types
+- Implement retry logic for token refresh scenarios
+- Respect cooldown timers to avoid API abuse
+- Provide real-time user feedback in TUI
+- **Optimization:** Check current board state before placing pixels - skip placement if pixel is already the correct color
+
+## Future Enhancements
+
+### Priority Features
+- **Proper queue management system** with retry logic and prioritization
+- **Sophisticated cooldown management** with precise timer tracking based on API responses
+
+### Advanced Features
+- **TUI-based pixel art editor** with save/load functionality
+- **PNG import with color mapping** support
+- **Multiple account support** for coordinated placement
+- **Proxy support** for distributed placement
+- **Configuration file** for API endpoint, credentials, art paths
+- **Real-time board updates (WebSocket)** - investigate `/updates` endpoint in backend
+- **Better error reporting and logging** system
+- **Scripting/automation** - allow users to define placement strategies or scripts
