@@ -83,6 +83,9 @@ impl App {
             initial_board_fetched: false,
             last_board_refresh: None,
             should_fetch_board_on_start: should_fetch_on_start,
+            board_loading: false,
+            board_load_start: None,
+            board_fetch_receiver: None,
             base_url_options,
             base_url_selection_index: 0,
             current_editing_art: None,
@@ -90,11 +93,17 @@ impl App {
             art_editor_cursor_y: 0,
             art_editor_selected_color_id: 1,
             art_editor_color_palette_index: 0,
-            art_editor_filename_buffer: String::new(),
             art_editor_canvas_width: 30,
             art_editor_canvas_height: 20,
             art_editor_viewport_x: 0,
             art_editor_viewport_y: 0,
+            available_pixel_arts: Vec::new(),
+            art_selection_index: 0,
+            art_queue: Vec::new(),
+            queue_selection_index: 0,
+            queue_processing: false,
+            queue_blink_state: false,
+            last_blink_time: None,
         }
     }
 

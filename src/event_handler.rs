@@ -1,25 +1,39 @@
 use crate::api_client::ApiError;
-use crate::app_state::{App, InputMode};
-use crate::art::{load_default_pixel_art, ArtPixel, PixelArt};
+use crate::app_state::{App, ArtQueueItem, BoardFetchResult, InputMode, QueueStatus};
+use crate::art::{get_available_pixel_arts, load_default_pixel_art, ArtPixel, PixelArt};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use std::collections::HashSet;
 use std::fs::File;
 use std::io;
 use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
 
 impl App {
     pub async fn handle_events(&mut self) -> io::Result<()> {
         // Check if we need to fetch board on startup (when tokens were restored)
         if self.should_fetch_board_on_start {
             self.should_fetch_board_on_start = false; // Clear the flag
-            self.fetch_board_data().await;
+            self.trigger_board_fetch();
+        }
+
+        // Update blink state for queue previews
+        self.update_blink_state();
+
+        // Check for completed board fetches
+        if let Some(receiver) = &mut self.board_fetch_receiver {
+            if let Ok(result) = receiver.try_recv() {
+                self.handle_board_fetch_result(result);
+            }
         }
 
         let mut should_refresh_board = false;
         if self.input_mode == InputMode::None
             && self.initial_board_fetched
             && self.api_client.get_auth_cookie_preview().is_some()
+            && !self.board_loading
+        // Don't trigger refresh if already loading
         {
             if let Some(last_refresh) = self.last_board_refresh {
                 if last_refresh.elapsed() >= Duration::from_secs(10) {
@@ -30,9 +44,10 @@ impl App {
 
         if should_refresh_board {
             self.status_message = "Auto-refreshing board...".to_string();
-            self.fetch_board_data().await;
+            self.trigger_board_fetch();
         }
 
+        // Check for user input first - only process board loading if no input is pending
         if event::poll(Duration::from_millis(50))? {
             match event::read()? {
                 Event::Key(key_event) => {
@@ -209,6 +224,12 @@ impl App {
                                         KeyCode::Enter => {
                                             self.place_loaded_art().await;
                                         }
+                                        KeyCode::Esc => {
+                                            self.loaded_art = None;
+                                            self.status_message =
+                                                "Loaded art cancelled. Board scroll re-enabled."
+                                                    .to_string();
+                                        }
                                         _ => {}
                                     }
                                     if art_moved {
@@ -244,51 +265,28 @@ impl App {
                                             self.status_message = "Re-enter Access Token (current will be overwritten if new is provided, skip Refresh Token step if not needed):".to_string();
                                             self.input_buffer.clear();
                                         }
-                                        KeyCode::Char('r') => self.fetch_board_data().await,
+                                        KeyCode::Char('r') => self.trigger_board_fetch(),
                                         KeyCode::Char('p') => self.fetch_profile_data().await,
                                         KeyCode::Char('l') => {
-                                            self.loaded_art = Some(load_default_pixel_art());
-                                            if let Some(art) = &self.loaded_art {
+                                            // Load art selection menu
+                                            self.available_pixel_arts = get_available_pixel_arts();
+                                            if !self.available_pixel_arts.is_empty() {
+                                                self.input_mode = InputMode::ArtSelection;
+                                                self.art_selection_index = 0;
                                                 self.status_message = format!(
-                                                    "Loaded art: '{}'. Use arrow keys to move. Board scroll disabled.",
-                                                    art.name
+                                                    "Select pixel art to load ({} available). Use arrows and Enter.",
+                                                    self.available_pixel_arts.len()
                                                 );
                                             } else {
-                                                self.status_message =
-                                                    "Failed to load art.".to_string();
+                                                self.status_message = "No pixel arts available. Create some first with 'e'.".to_string();
                                             }
                                         }
                                         KeyCode::Char('e') => {
-                                            self.input_mode = InputMode::ArtEditor;
-                                            if self.current_editing_art.is_none() {
-                                                self.current_editing_art = Some(PixelArt {
-                                                    name: "NewArt".to_string(),
-                                                    pixels: Vec::new(),
-                                                    board_x: 0,
-                                                    board_y: 0,
-                                                });
-                                                self.art_editor_cursor_x = 0;
-                                                self.art_editor_cursor_y = 0;
-                                                self.art_editor_selected_color_id = 1;
-                                            }
-
-                                            // Sync color palette index with selected color
-                                            if let Some(index) = self.colors.iter().position(|c| {
-                                                c.id == self.art_editor_selected_color_id
-                                            }) {
-                                                self.art_editor_color_palette_index = index;
-                                            } else {
-                                                self.art_editor_color_palette_index = 0;
-                                                if let Some(first_color) = self.colors.first() {
-                                                    self.art_editor_selected_color_id =
-                                                        first_color.id;
-                                                }
-                                            }
-
-                                            self.status_message = format!(
-                                                "Entered Pixel Art Editor. Canvas: {}x{}. Arrows to move, Space to draw, Tab to change colors, s to save.",
-                                                self.art_editor_canvas_width, self.art_editor_canvas_height
-                                            );
+                                            // Start by asking for art name
+                                            self.input_mode = InputMode::ArtEditorNewArtName;
+                                            self.input_buffer.clear();
+                                            self.status_message =
+                                                "Enter name for new pixel art:".to_string();
                                         }
                                         KeyCode::Char('?') => {
                                             self.input_mode = InputMode::ShowHelp;
@@ -301,6 +299,33 @@ impl App {
                                             self.status_message =
                                                 "Showing user profile. Press Esc, q, or i to close."
                                                     .to_string();
+                                        }
+                                        KeyCode::Char('w') => {
+                                            // Open work queue management
+                                            self.input_mode = InputMode::ArtQueue;
+                                            self.status_message = "Work Queue Management. Use arrows to navigate, + to add loaded art, Q to start processing.".to_string();
+                                        }
+                                        KeyCode::Char('+') => {
+                                            // Add currently loaded art to queue
+                                            if let Some(art) = &self.loaded_art {
+                                                self.add_art_to_queue(art.clone()).await;
+                                            } else {
+                                                self.status_message =
+                                                    "No art loaded. Use 'l' to load art first."
+                                                        .to_string();
+                                            }
+                                        }
+                                        KeyCode::Char('Q') => {
+                                            // Start queue processing
+                                            if !self.art_queue.is_empty() {
+                                                self.queue_processing = true;
+                                                self.input_mode = InputMode::None;
+                                                self.start_queue_processing().await;
+                                            } else {
+                                                self.status_message =
+                                                    "Queue is empty. Add some arts first."
+                                                        .to_string();
+                                            }
                                         }
                                         _ => {}
                                     }
@@ -353,9 +378,11 @@ impl App {
                                 }
                                 KeyCode::Char('s') => {
                                     if self.current_editing_art.is_some() {
-                                        self.input_mode = InputMode::ArtEditorFileName;
-                                        self.art_editor_filename_buffer.clear();
-                                        self.status_message = "Enter filename to save art (e.g., my_art.json). Press Enter to save, Esc to cancel.".to_string();
+                                        // Auto-save with the art's name instead of prompting for filename
+                                        if let Some(art) = &self.current_editing_art {
+                                            let filename = format!("{}.json", art.name);
+                                            self.save_current_art_to_file(filename).await;
+                                        }
                                     } else {
                                         self.status_message = "No art to save.".to_string();
                                     }
@@ -408,31 +435,7 @@ impl App {
                                     }
                                 }
                                 KeyCode::Backspace => {
-                                    self.art_editor_filename_buffer.pop();
-                                }
-                                _ => {}
-                            },
-                            InputMode::ArtEditorFileName => match key_event.code {
-                                KeyCode::Enter => {
-                                    let filename =
-                                        self.art_editor_filename_buffer.trim().to_string();
-                                    if !filename.is_empty() {
-                                        self.save_current_art_to_file(filename).await;
-                                        self.input_mode = InputMode::ArtEditor;
-                                    } else {
-                                        self.status_message = "Filename cannot be empty. Press Esc to cancel or type a name.".to_string();
-                                    }
-                                }
-                                KeyCode::Esc => {
-                                    self.input_mode = InputMode::ArtEditor;
-                                    self.status_message = "Save art cancelled.".to_string();
-                                    self.art_editor_filename_buffer.clear();
-                                }
-                                KeyCode::Char(to_insert) => {
-                                    self.art_editor_filename_buffer.push(to_insert);
-                                }
-                                KeyCode::Backspace => {
-                                    self.art_editor_filename_buffer.pop();
+                                    // No action needed for backspace in art editor
                                 }
                                 _ => {}
                             },
@@ -450,23 +453,242 @@ impl App {
                                 }
                                 _ => {}
                             },
+                            InputMode::ArtEditorNewArtName => match key_event.code {
+                                KeyCode::Enter => {
+                                    let name = self.input_buffer.trim().to_string();
+                                    if !name.is_empty() {
+                                        self.current_editing_art = Some(PixelArt {
+                                            name,
+                                            pixels: Vec::new(),
+                                            board_x: 0,
+                                            board_y: 0,
+                                        });
+                                        self.input_mode = InputMode::ArtEditor;
+                                        self.status_message = format!(
+                                            "Entered Pixel Art Editor. Canvas: {}x{}. Arrows to move, Space to draw, Tab to change colors, s to save.",
+                                            self.art_editor_canvas_width, self.art_editor_canvas_height
+                                        );
+
+                                        // Initialize editor state
+                                        self.art_editor_cursor_x = 0;
+                                        self.art_editor_cursor_y = 0;
+                                        self.art_editor_selected_color_id = 1;
+
+                                        // Sync color palette index with selected color
+                                        if let Some(index) = self
+                                            .colors
+                                            .iter()
+                                            .position(|c| c.id == self.art_editor_selected_color_id)
+                                        {
+                                            self.art_editor_color_palette_index = index;
+                                        } else {
+                                            self.art_editor_color_palette_index = 0;
+                                            if let Some(first_color) = self.colors.first() {
+                                                self.art_editor_selected_color_id = first_color.id;
+                                            }
+                                        }
+                                    } else {
+                                        self.status_message =
+                                            "Name cannot be empty. Please enter a name."
+                                                .to_string();
+                                    }
+                                }
+                                KeyCode::Esc => {
+                                    self.input_mode = InputMode::None;
+                                    self.status_message =
+                                        "New art name input cancelled.".to_string();
+                                }
+                                KeyCode::Char(to_insert) => self.input_buffer.push(to_insert),
+                                KeyCode::Backspace => {
+                                    self.input_buffer.pop();
+                                }
+                                _ => {}
+                            },
+                            InputMode::ArtSelection => match key_event.code {
+                                KeyCode::Up => {
+                                    if self.art_selection_index > 0 {
+                                        self.art_selection_index -= 1;
+                                    }
+                                }
+                                KeyCode::Down => {
+                                    if self.art_selection_index
+                                        < self.available_pixel_arts.len() - 1
+                                    {
+                                        self.art_selection_index += 1;
+                                    }
+                                }
+                                KeyCode::Enter => {
+                                    if let Some(selected_art) =
+                                        self.available_pixel_arts.get(self.art_selection_index)
+                                    {
+                                        self.loaded_art = Some(selected_art.clone());
+                                        self.input_mode = InputMode::None;
+                                        self.status_message = format!(
+                                            "Loaded art: '{}'. Use arrow keys to move. Board scroll disabled.",
+                                            selected_art.name
+                                        );
+                                    }
+                                }
+                                KeyCode::Esc => {
+                                    self.input_mode = InputMode::None;
+                                    self.status_message = "Art selection cancelled.".to_string();
+                                }
+                                KeyCode::Char('q') => self.exit = true,
+                                _ => {}
+                            },
+                            InputMode::ArtQueue => match key_event.code {
+                                KeyCode::Up => {
+                                    if self.queue_selection_index > 0 {
+                                        self.queue_selection_index -= 1;
+                                    }
+                                }
+                                KeyCode::Down => {
+                                    if self.queue_selection_index
+                                        < self.art_queue.len().saturating_sub(1)
+                                    {
+                                        self.queue_selection_index += 1;
+                                    }
+                                }
+                                KeyCode::Char('+') => {
+                                    // Add currently loaded art to queue
+                                    if let Some(art) = &self.loaded_art {
+                                        self.add_art_to_queue(art.clone()).await;
+                                    } else {
+                                        self.status_message =
+                                            "No art loaded. Use 'l' to load art first.".to_string();
+                                    }
+                                }
+                                KeyCode::Char('Q') => {
+                                    // Start queue processing
+                                    if !self.art_queue.is_empty() {
+                                        self.queue_processing = true;
+                                        self.input_mode = InputMode::None;
+                                        self.start_queue_processing().await;
+                                    } else {
+                                        self.status_message =
+                                            "Queue is empty. Add some arts first.".to_string();
+                                    }
+                                }
+                                KeyCode::Char('c') => {
+                                    // Clear queue
+                                    self.art_queue.clear();
+                                    self.queue_selection_index = 0;
+                                    self.status_message = "Queue cleared.".to_string();
+                                }
+                                KeyCode::Delete | KeyCode::Char('d') => {
+                                    // Remove selected item from queue
+                                    if !self.art_queue.is_empty()
+                                        && self.queue_selection_index < self.art_queue.len()
+                                    {
+                                        let removed_art =
+                                            self.art_queue.remove(self.queue_selection_index);
+                                        self.status_message = format!(
+                                            "Removed '{}' from queue.",
+                                            removed_art.art.name
+                                        );
+                                        if self.queue_selection_index >= self.art_queue.len()
+                                            && !self.art_queue.is_empty()
+                                        {
+                                            self.queue_selection_index = self.art_queue.len() - 1;
+                                        }
+                                    }
+                                }
+                                KeyCode::Char('1'..='5') => {
+                                    // Set priority for selected item
+                                    if !self.art_queue.is_empty()
+                                        && self.queue_selection_index < self.art_queue.len()
+                                    {
+                                        let priority = match key_event.code {
+                                            KeyCode::Char('1') => 1,
+                                            KeyCode::Char('2') => 2,
+                                            KeyCode::Char('3') => 3,
+                                            KeyCode::Char('4') => 4,
+                                            KeyCode::Char('5') => 5,
+                                            _ => 3, // Default priority
+                                        };
+                                        self.art_queue[self.queue_selection_index].priority =
+                                            priority;
+                                        self.sort_queue_by_priority();
+                                        self.status_message = format!(
+                                            "Set priority {} for '{}'",
+                                            priority,
+                                            self.art_queue[self.queue_selection_index].art.name
+                                        );
+                                    }
+                                }
+                                KeyCode::Esc => {
+                                    self.input_mode = InputMode::None;
+                                    self.status_message = "Queue management closed.".to_string();
+                                }
+                                _ => {}
+                            },
                         }
                     }
                 }
                 _ => { /* Other events */ }
             }
+        } else {
+            // No pending input events - all processing happens via async channels now
+            // Board fetches are spawned as background tasks and results come via channels
         }
         Ok(())
     }
 
-    async fn fetch_board_data(&mut self) {
-        self.status_message = "Fetching board data...".to_string();
-        match self.api_client.get_board().await {
-            Ok(board_response) => {
+    /// Trigger a non-blocking board fetch if one isn't already in progress
+    fn trigger_board_fetch(&mut self) {
+        if self.board_loading {
+            // Already loading, don't start another
+            return;
+        }
+
+        self.board_loading = true;
+        self.board_load_start = Some(Instant::now());
+
+        if self.board.is_empty() {
+            self.status_message = "Loading board data...".to_string();
+        } else {
+            self.status_message = "Refreshing board data...".to_string();
+        }
+
+        // Create channel for this fetch
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.board_fetch_receiver = Some(rx);
+
+        // Clone API client data needed for the fetch
+        let base_url = self.api_client.get_base_url();
+        let access_token = self.api_client.get_access_token_clone();
+        let refresh_token = self.api_client.get_refresh_token_clone();
+
+        // Spawn async task for board fetching
+        tokio::spawn(async move {
+            let mut api_client =
+                crate::api_client::ApiClient::new(Some(base_url), access_token, refresh_token);
+
+            let result = match api_client.get_board().await {
+                Ok(board_response) => BoardFetchResult::Success(board_response),
+                Err(e) => BoardFetchResult::Error(format!("{:?}", e)),
+            };
+
+            // Send result back - if this fails, the main app has been dropped
+            let _ = tx.send(result);
+        });
+    }
+
+    /// Handle completed board fetch results from background tasks
+    fn handle_board_fetch_result(&mut self, result: BoardFetchResult) {
+        let load_time = self
+            .board_load_start
+            .map(|start| start.elapsed().as_millis())
+            .unwrap_or(0);
+
+        match result {
+            BoardFetchResult::Success(board_response) => {
                 self.board = board_response.board;
                 self.colors = board_response.colors;
+
                 self.status_message = format!(
-                    "Board data fetched. {} colors. Board size: {}x{}. Arrows to scroll.",
+                    "Board data loaded in {}ms. {} colors. Board size: {}x{}. Arrows to scroll.",
+                    load_time,
                     self.colors.len(),
                     self.board.len(),
                     if self.board.is_empty() {
@@ -475,6 +697,59 @@ impl App {
                         self.board[0].len()
                     }
                 );
+
+                self.last_board_refresh = Some(Instant::now());
+                if !self.initial_board_fetched {
+                    self.initial_board_fetched = true;
+                }
+                // Save tokens in case they were refreshed during the API call
+                self.save_tokens();
+            }
+            BoardFetchResult::Error(error_msg) => {
+                self.status_message = format!(
+                    "Error fetching board after {}ms: {}. Try 'r' to refresh.",
+                    load_time, error_msg
+                );
+                self.last_board_refresh = Some(Instant::now());
+            }
+        }
+
+        // Reset loading state
+        self.board_loading = false;
+        self.board_load_start = None;
+        self.board_fetch_receiver = None;
+    }
+
+    async fn fetch_board_data(&mut self) {
+        // If not triggered by trigger_board_fetch, set up loading state
+        if !self.board_loading {
+            self.board_loading = true;
+            self.board_load_start = Some(Instant::now());
+            self.status_message = "Fetching board data...".to_string();
+        }
+
+        match self.api_client.get_board().await {
+            Ok(board_response) => {
+                self.board = board_response.board;
+                self.colors = board_response.colors;
+
+                let load_time = self
+                    .board_load_start
+                    .map(|start| start.elapsed().as_millis())
+                    .unwrap_or(0);
+
+                self.status_message = format!(
+                    "Board data loaded in {}ms. {} colors. Board size: {}x{}. Arrows to scroll.",
+                    load_time,
+                    self.colors.len(),
+                    self.board.len(),
+                    if self.board.is_empty() {
+                        0
+                    } else {
+                        self.board[0].len()
+                    }
+                );
+
                 self.last_board_refresh = Some(Instant::now());
                 if !self.initial_board_fetched {
                     self.initial_board_fetched = true;
@@ -483,9 +758,17 @@ impl App {
                 self.save_tokens();
             }
             Err(e) => {
+                let load_time = self
+                    .board_load_start
+                    .map(|start| start.elapsed().as_millis())
+                    .unwrap_or(0);
+
                 match e {
                     ApiError::Unauthorized => {
-                        self.status_message = "Session expired or cookie invalid. Auto-refresh paused. Enter new tokens or restart.".to_string();
+                        self.status_message = format!(
+                            "Session expired after {}ms. Auto-refresh paused. Enter new tokens or restart.", 
+                            load_time
+                        );
                         self.api_client.clear_tokens();
                         // Clear saved tokens when session expires
                         self.clear_saved_tokens();
@@ -494,12 +777,17 @@ impl App {
                         // Use enhanced error display for API errors
                         self.handle_api_error_with_enhanced_display("Error fetching board", &e)
                             .await;
-                        self.status_message.push_str(" Try 'r' to refresh.");
+                        self.status_message
+                            .push_str(&format!(" ({}ms) Try 'r' to refresh.", load_time));
                     }
                 }
                 self.last_board_refresh = Some(Instant::now());
             }
         }
+
+        // Reset loading state
+        self.board_loading = false;
+        self.board_load_start = None;
     }
 
     async fn fetch_profile_data(&mut self) {
@@ -553,15 +841,41 @@ impl App {
         }
 
         let art_to_place = self.loaded_art.clone().unwrap();
-        let total_pixels = art_to_place.pixels.len();
+
+        // Filter out background/transparent pixels and duplicates
+        let meaningful_pixels = self.filter_meaningful_pixels(&art_to_place);
+        let total_pixels = meaningful_pixels.len();
+
+        if total_pixels == 0 {
+            self.status_message = format!(
+                "Art '{}' has no meaningful pixels to place (all background/transparent).",
+                art_to_place.name
+            );
+            return;
+        }
+
         self.status_message = format!(
-            "Starting to place art '{}' ({} pixels)...",
-            art_to_place.name, total_pixels
+            "Starting to place art '{}' ({} meaningful pixels out of {} total)...",
+            art_to_place.name,
+            total_pixels,
+            art_to_place.pixels.len()
         );
 
-        for (index, art_pixel) in art_to_place.pixels.iter().enumerate() {
+        for (index, art_pixel) in meaningful_pixels.iter().enumerate() {
             let abs_x = art_to_place.board_x + art_pixel.x;
             let abs_y = art_to_place.board_y + art_pixel.y;
+
+            // Check if pixel is already the correct color to avoid unnecessary placement
+            if self.is_pixel_already_correct(abs_x, abs_y, art_pixel.color_id) {
+                self.status_message = format!(
+                    "Pixel {}/{} at ({},{}) already correct color, skipping...",
+                    index + 1,
+                    total_pixels,
+                    abs_x,
+                    abs_y
+                );
+                continue;
+            }
 
             self.status_message = format!(
                 "Placing pixel {}/{} ('{}') at ({},{}) with color_id {}...",
@@ -641,7 +955,7 @@ impl App {
                             || status.as_u16() == 420
                         {
                             // Enhanced display already updated user timers, just refresh board
-                            self.fetch_board_data().await;
+                            self.trigger_board_fetch();
                         }
                     }
 
@@ -655,16 +969,89 @@ impl App {
             "Finished placing art '{}'. Refreshing board...",
             art_to_place.name
         );
-        self.fetch_board_data().await;
+        self.trigger_board_fetch();
+    }
+
+    /// Filter out background/transparent pixels and remove duplicates
+    fn filter_meaningful_pixels(&self, art: &PixelArt) -> Vec<ArtPixel> {
+        let mut meaningful_pixels = Vec::new();
+        let mut seen_positions = HashSet::new();
+
+        // Define background color IDs that should not be placed
+        // Usually color_id 1 is white/background, but we can be smarter about this
+        let background_color_ids = self.get_background_color_ids();
+
+        for pixel in &art.pixels {
+            // Skip if this position was already processed (remove duplicates)
+            let position = (pixel.x, pixel.y);
+            if seen_positions.contains(&position) {
+                continue;
+            }
+
+            // Skip background/transparent colors
+            if background_color_ids.contains(&pixel.color_id) {
+                continue;
+            }
+
+            meaningful_pixels.push(pixel.clone());
+            seen_positions.insert(position);
+        }
+
+        meaningful_pixels
+    }
+
+    /// Get color IDs that should be considered background/transparent
+    fn get_background_color_ids(&self) -> HashSet<i32> {
+        let mut background_ids = HashSet::new();
+
+        // Only filter colors explicitly marked as transparent/background
+        for color in &self.colors {
+            let name_lower = color.name.to_lowercase();
+            if name_lower.contains("transparent") 
+                || name_lower.contains("background")
+                || name_lower.contains("empty")
+                || name_lower == "none"
+                // Only filter if explicitly alpha/transparent in name
+                || name_lower.contains("alpha")
+            {
+                background_ids.insert(color.id);
+            }
+        }
+
+        // Don't filter any colors by default - let users place any color they want
+        // Including white (color_id 1) which is a valid placeable color
+
+        background_ids
+    }
+
+    /// Check if a pixel at the given position already has the correct color
+    fn is_pixel_already_correct(&self, x: i32, y: i32, expected_color_id: i32) -> bool {
+        // Convert to usize for array indexing
+        let x_idx = x as usize;
+        let y_idx = y as usize;
+
+        // Check bounds
+        if x_idx >= self.board.len() || y_idx >= self.board.get(x_idx).map_or(0, |col| col.len()) {
+            return false;
+        }
+
+        // Check if the pixel exists and has the correct color
+        if let Some(current_pixel) = &self.board[x_idx][y_idx] {
+            current_pixel.c == expected_color_id
+        } else {
+            // No pixel exists, so it's not the correct color
+            false
+        }
     }
 
     async fn save_current_art_to_file(&mut self, filename: String) {
         if let Some(art) = &self.current_editing_art {
+            // Use the art's existing name, and preserve any positioning
             let art_with_name = PixelArt {
                 name: art.name.clone(),
                 pixels: art.pixels.clone(),
-                board_x: 0,
-                board_y: 0,
+                board_x: art.board_x, // Preserve position for queue automation
+                board_y: art.board_y,
             };
             match serde_json::to_string_pretty(&art_with_name) {
                 Ok(json_data) => {
@@ -687,8 +1074,11 @@ impl App {
                                 self.status_message =
                                     format!("Error writing to file {}: {}", file_path.display(), e);
                             } else {
-                                self.status_message =
-                                    format!("Art saved to {}", file_path.display());
+                                self.status_message = format!(
+                                    "Art '{}' saved to {}",
+                                    art_with_name.name,
+                                    file_path.display()
+                                );
                             }
                         }
                         Err(e) => {
@@ -818,5 +1208,195 @@ impl App {
                 self.status_message = format!("{}: {:?}", base_message, error);
             }
         }
+    }
+
+    /// Update blink state for queue preview effects
+    fn update_blink_state(&mut self) {
+        let now = Instant::now();
+        if let Some(last_blink) = self.last_blink_time {
+            if now.duration_since(last_blink) >= Duration::from_millis(500) {
+                self.queue_blink_state = !self.queue_blink_state;
+                self.last_blink_time = Some(now);
+            }
+        } else {
+            self.last_blink_time = Some(now);
+        }
+    }
+
+    /// Add an art to the placement queue
+    async fn add_art_to_queue(&mut self, art: PixelArt) {
+        let meaningful_pixels = self.filter_meaningful_pixels(&art);
+
+        let queue_item = ArtQueueItem {
+            art: art.clone(),
+            priority: 3, // Default priority
+            status: QueueStatus::Pending,
+            pixels_placed: 0,
+            pixels_total: meaningful_pixels.len(),
+            added_time: Instant::now(),
+        };
+
+        self.art_queue.push(queue_item);
+        self.sort_queue_by_priority();
+
+        self.status_message = format!(
+            "Added '{}' to queue at position ({}, {}) with {} meaningful pixels.",
+            art.name,
+            art.board_x,
+            art.board_y,
+            meaningful_pixels.len()
+        );
+    }
+
+    /// Sort queue by priority (1=highest, 5=lowest)
+    fn sort_queue_by_priority(&mut self) {
+        self.art_queue.sort_by(|a, b| {
+            // Primary: priority (lower number = higher priority)
+            match a.priority.cmp(&b.priority) {
+                std::cmp::Ordering::Equal => {
+                    // Secondary: status (pending first, then others)
+                    match (&a.status, &b.status) {
+                        (QueueStatus::Pending, QueueStatus::Pending) => {
+                            // Tertiary: added time (earlier first)
+                            a.added_time.cmp(&b.added_time)
+                        }
+                        (QueueStatus::Pending, _) => std::cmp::Ordering::Less,
+                        (_, QueueStatus::Pending) => std::cmp::Ordering::Greater,
+                        _ => a.added_time.cmp(&b.added_time),
+                    }
+                }
+                other => other,
+            }
+        });
+    }
+
+    /// Start processing the art queue
+    async fn start_queue_processing(&mut self) {
+        if self.art_queue.is_empty() {
+            self.status_message = "Queue is empty.".to_string();
+            self.queue_processing = false;
+            return;
+        }
+
+        let pending_count = self
+            .art_queue
+            .iter()
+            .filter(|item| item.status == QueueStatus::Pending)
+            .count();
+        self.status_message = format!(
+            "Starting queue processing: {} pending items...",
+            pending_count
+        );
+
+        // Process only pending items
+        let mut processed_count = 0;
+        let mut total_pixels_placed = 0;
+
+        for i in 0..self.art_queue.len() {
+            if self.art_queue[i].status != QueueStatus::Pending {
+                continue;
+            }
+
+            // Update status to in progress
+            self.art_queue[i].status = QueueStatus::InProgress;
+            let art = self.art_queue[i].art.clone();
+
+            self.status_message = format!(
+                "Processing queue item {}/{}: '{}' at ({}, {})",
+                processed_count + 1,
+                pending_count,
+                art.name,
+                art.board_x,
+                art.board_y
+            );
+
+            // Place the art at its stored position
+            match self.place_art_from_queue(&art, i).await {
+                Ok(pixels_placed) => {
+                    self.art_queue[i].status = QueueStatus::Complete;
+                    self.art_queue[i].pixels_placed = pixels_placed;
+                    total_pixels_placed += pixels_placed;
+                    processed_count += 1;
+                }
+                Err(error_msg) => {
+                    self.art_queue[i].status = QueueStatus::Failed;
+                    self.status_message = format!("Failed to place '{}': {}", art.name, error_msg);
+                    break; // Stop processing on error
+                }
+            }
+        }
+
+        self.queue_processing = false;
+        self.status_message = format!(
+            "Queue processing complete: {} arts placed, {} total pixels placed.",
+            processed_count, total_pixels_placed
+        );
+
+        // Refresh board to show results
+        self.trigger_board_fetch();
+    }
+
+    /// Place art from queue at its stored position
+    async fn place_art_from_queue(
+        &mut self,
+        art: &PixelArt,
+        queue_index: usize,
+    ) -> Result<usize, String> {
+        let meaningful_pixels = self.filter_meaningful_pixels(art);
+
+        if meaningful_pixels.is_empty() {
+            self.art_queue[queue_index].status = QueueStatus::Skipped;
+            return Ok(0);
+        }
+
+        let mut pixels_placed = 0;
+
+        for (pixel_index, art_pixel) in meaningful_pixels.iter().enumerate() {
+            let abs_x = art.board_x + art_pixel.x;
+            let abs_y = art.board_y + art_pixel.y;
+
+            // Check if pixel is already correct
+            if self.is_pixel_already_correct(abs_x, abs_y, art_pixel.color_id) {
+                continue;
+            }
+
+            // Update progress
+            self.art_queue[queue_index].pixels_placed = pixel_index;
+            self.status_message = format!(
+                "Placing '{}': pixel {}/{} at ({}, {})",
+                art.name,
+                pixel_index + 1,
+                meaningful_pixels.len(),
+                abs_x,
+                abs_y
+            );
+
+            // Wait for cooldown if needed
+            if let Some(u_info) = &self.user_info {
+                if u_info.pixel_buffer <= 0 && u_info.pixel_timer > 0 {
+                    tokio::time::sleep(Duration::from_secs(u_info.pixel_timer as u64)).await;
+                }
+            }
+
+            // Place the pixel
+            match self
+                .api_client
+                .place_pixel(abs_x, abs_y, art_pixel.color_id)
+                .await
+            {
+                Ok(response) => {
+                    pixels_placed += 1;
+                    self.user_info = Some(response.user_infos);
+                }
+                Err(e) => {
+                    return Err(format!("API error: {:?}", e));
+                }
+            }
+
+            // Small delay between pixels
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        Ok(pixels_placed)
     }
 }

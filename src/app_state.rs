@@ -1,7 +1,8 @@
-use crate::api_client::{ApiClient, ColorInfo, PixelNetwork, UserInfos};
+use crate::api_client::{ApiClient, BoardGetResponse, ColorInfo, PixelNetwork, UserInfos};
 use crate::art::PixelArt;
 use crate::token_storage::TokenStorage;
 use std::time::Instant;
+use tokio::sync::mpsc;
 
 #[derive(Debug, PartialEq, Eq, Default)]
 pub enum InputMode {
@@ -12,9 +13,30 @@ pub enum InputMode {
     EnterAccessToken,       // Renamed from Cookie
     EnterRefreshToken,      // New
     ArtEditor,              // New mode for creating/editing pixel art
-    ArtEditorFileName,      // New mode for entering filename for saving art
+    ArtEditorNewArtName,    // New mode for entering name when creating new art
+    ArtSelection,           // New mode for selecting pixel art to load/place
+    ArtQueue,               // New mode for managing art placement queue
     ShowHelp,               // New mode for displaying available commands
     ShowProfile,            // New mode for displaying user profile
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueueStatus {
+    Pending,
+    InProgress,
+    Complete,
+    Skipped, // If no meaningful pixels to place
+    Failed,  // If placement failed
+}
+
+#[derive(Debug, Clone)]
+pub struct ArtQueueItem {
+    pub art: PixelArt,
+    pub priority: u8, // 1=high, 5=low
+    pub status: QueueStatus,
+    pub pixels_placed: usize, // Track progress
+    pub pixels_total: usize,  // Total meaningful pixels
+    pub added_time: Instant,  // When added to queue
 }
 
 #[derive(Debug)]
@@ -34,6 +56,9 @@ pub struct App {
     pub initial_board_fetched: bool, // New flag
     pub last_board_refresh: Option<Instant>, // For auto-refresh
     pub should_fetch_board_on_start: bool, // Flag to trigger board fetch when tokens are restored
+    pub board_loading: bool,         // Flag to indicate board is being fetched in background
+    pub board_load_start: Option<Instant>, // When background load started
+    pub board_fetch_receiver: Option<mpsc::UnboundedReceiver<BoardFetchResult>>, // Channel for receiving board fetch results
 
     // State for Base URL selection
     pub base_url_options: Vec<String>,
@@ -45,9 +70,25 @@ pub struct App {
     pub art_editor_cursor_y: i32,              // Cursor Y position on the art canvas
     pub art_editor_selected_color_id: i32,     // Currently selected color_id for drawing
     pub art_editor_color_palette_index: usize, // Index in the colors array for palette navigation
-    pub art_editor_filename_buffer: String,    // Buffer for filename input
     pub art_editor_canvas_width: u16,          // Width of the art editor canvas
     pub art_editor_canvas_height: u16,         // Height of the art editor canvas
     pub art_editor_viewport_x: i32,            // X offset of the art editor viewport
     pub art_editor_viewport_y: i32,            // Y offset of the art editor viewport
+
+    // Pixel Art Selection State
+    pub available_pixel_arts: Vec<PixelArt>, // List of available pixel arts (saved + default)
+    pub art_selection_index: usize,          // Current selection in art list
+
+    // Art Queue System
+    pub art_queue: Vec<ArtQueueItem>, // Queue of arts to be placed
+    pub queue_selection_index: usize, // Current selection in queue list
+    pub queue_processing: bool,       // Whether queue is currently being processed
+    pub queue_blink_state: bool,      // For blinking preview effect
+    pub last_blink_time: Option<Instant>, // Last time blink state changed
+}
+
+#[derive(Debug)]
+pub enum BoardFetchResult {
+    Success(BoardGetResponse),
+    Error(String),
 }

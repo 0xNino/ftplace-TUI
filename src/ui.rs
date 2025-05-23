@@ -42,11 +42,13 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
         }
         InputMode::EnterCustomBaseUrlText
         | InputMode::EnterAccessToken
-        | InputMode::EnterRefreshToken => {
+        | InputMode::EnterRefreshToken
+        | InputMode::ArtEditorNewArtName => {
             let title = match app.input_mode {
                 InputMode::EnterCustomBaseUrlText => "Custom Base URL (Editing):",
                 InputMode::EnterAccessToken => "Access Token (Editing):",
                 InputMode::EnterRefreshToken => "Refresh Token (Editing):",
+                InputMode::ArtEditorNewArtName => "New Pixel Art Name (Editing):",
                 _ => "Input:", // Should not happen if logic is correct
             };
             let input_widget = Paragraph::new(app.input_buffer.as_str())
@@ -56,6 +58,12 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
                 input_area_rect.x + app.input_buffer.chars().count() as u16 + 1,
                 input_area_rect.y + 1,
             );
+        }
+        InputMode::ArtSelection => {
+            render_art_selection_ui(app, frame, input_area_rect);
+        }
+        InputMode::ArtQueue => {
+            render_art_queue_ui(app, frame, input_area_rect);
         }
         _ => {
             // For InputMode::None or ArtEditor modes, show current config (simplified)
@@ -77,24 +85,42 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
 
     // --- Board Display Area or Art Editor Area (main_layout[1]) ---
     match app.input_mode {
-        InputMode::ArtEditor | InputMode::ArtEditorFileName => {
-            // ArtEditorFileName should also show editor
+        InputMode::ArtEditor => {
             render_art_editor_ui(app, frame, main_layout[1]);
         }
         _ => {
             // Includes EnterBaseUrl, EnterCustomBaseUrlText, EnterAccessToken, EnterRefreshToken, None
             let board_area = main_layout[1];
-            let board_block = Block::default().borders(Borders::ALL).title(format!(
-                "Board Display (Viewport @ {},{} - Size {}x{})",
-                app.board_viewport_x,
-                app.board_viewport_y,
-                app.board.len(),
-                if app.board.is_empty() {
-                    0
-                } else {
-                    app.board[0].len()
-                }
-            ));
+            let board_title = if app.board_loading {
+                let elapsed = app
+                    .board_load_start
+                    .map(|start| start.elapsed().as_secs())
+                    .unwrap_or(0);
+                format!(
+                    "Board Display - Loading... ({}s) - Size {}x{}",
+                    elapsed,
+                    app.board.len(),
+                    if app.board.is_empty() {
+                        0
+                    } else {
+                        app.board[0].len()
+                    }
+                )
+            } else {
+                format!(
+                    "Board Display (Viewport @ {},{} - Size {}x{})",
+                    app.board_viewport_x,
+                    app.board_viewport_y,
+                    app.board.len(),
+                    if app.board.is_empty() {
+                        0
+                    } else {
+                        app.board[0].len()
+                    }
+                )
+            };
+
+            let board_block = Block::default().borders(Borders::ALL).title(board_title);
             frame.render_widget(board_block, board_area);
 
             let inner_board_area = main_layout[1].inner(Margin {
@@ -210,6 +236,66 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
                                 cell.set_fg(art_color);
                             } else {
                                 cell.set_bg(art_color);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Overlay queue previews with blinking effect
+            if !app.art_queue.is_empty() {
+                for queue_item in &app.art_queue {
+                    // Only show pending items with blinking effect
+                    if queue_item.status != crate::app_state::QueueStatus::Pending {
+                        continue;
+                    }
+
+                    for art_pixel in &queue_item.art.pixels {
+                        let art_abs_x = queue_item.art.board_x + art_pixel.x;
+                        let art_abs_y = queue_item.art.board_y + art_pixel.y;
+
+                        // Is this art pixel visible in the current viewport?
+                        if art_abs_x >= app.board_viewport_x as i32
+                            && art_abs_x < (app.board_viewport_x + inner_board_area.width) as i32
+                            && art_abs_y >= app.board_viewport_y as i32
+                            && art_abs_y
+                                < (app.board_viewport_y + inner_board_area.height * 2) as i32
+                        {
+                            let screen_cell_x = (art_abs_x - app.board_viewport_x as i32) as u16;
+                            let screen_cell_y =
+                                ((art_abs_y - app.board_viewport_y as i32) / 2) as u16;
+
+                            let target_abs_screen_x = inner_board_area.x + screen_cell_x;
+                            let target_abs_screen_y = inner_board_area.y + screen_cell_y;
+
+                            // Ensure the target cell is within bounds
+                            if screen_cell_x < inner_board_area.width
+                                && screen_cell_y < inner_board_area.height
+                            {
+                                let cell = frame
+                                    .buffer_mut()
+                                    .get_mut(target_abs_screen_x, target_abs_screen_y);
+
+                                // Blinking effect for queue previews
+                                if app.queue_blink_state {
+                                    // Priority-based colors for blink
+                                    let preview_color = match queue_item.priority {
+                                        1 => Color::Red,     // High priority - red
+                                        2 => Color::Yellow,  // High-medium - yellow
+                                        3 => Color::Cyan,    // Medium - cyan
+                                        4 => Color::Green,   // Low-medium - green
+                                        5 => Color::Blue,    // Low priority - blue
+                                        _ => Color::Magenta, // Default
+                                    };
+
+                                    cell.set_char('▀');
+                                    if (art_abs_y - app.board_viewport_y as i32) % 2 == 0 {
+                                        cell.set_fg(preview_color);
+                                    } else {
+                                        cell.set_bg(preview_color);
+                                    }
+                                }
+                                // When blink_state is false, show original content
                             }
                         }
                     }
@@ -364,27 +450,6 @@ pub fn render_art_editor_ui(app: &mut App, frame: &mut Frame, area: Rect) {
 
     // Interactive Color Palette with Names
     render_color_palette(app, frame, palette_area);
-
-    // If in filename input mode, render that input field over the palette or status bar
-    if app.input_mode == InputMode::ArtEditorFileName {
-        let popup_area = centered_rect(60, 20, frame.size()); // Adjust size as needed
-        let filename_input_area = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3)].as_ref())
-            .split(popup_area)[0]; // Take the top part for the input box
-
-        let filename_input_widget = Paragraph::new(app.art_editor_filename_buffer.as_str()).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Save Art As (Enter to Save, Esc to Cancel):"),
-        );
-        frame.render_widget(Clear, filename_input_area); // Clear the area first
-        frame.render_widget(filename_input_widget, filename_input_area);
-        frame.set_cursor(
-            filename_input_area.x + app.art_editor_filename_buffer.chars().count() as u16 + 1,
-            filename_input_area.y + 1,
-        );
-    }
 }
 
 /// Render an interactive color palette with named colors
@@ -538,6 +603,7 @@ fn render_help_popup(app: &App, frame: &mut Frame) {
         Line::from(" r: Refresh board data"),
         Line::from(" p: Fetch profile data"),
         Line::from(" i: Show user profile panel"),
+        Line::from(" w: Work queue management"),
         Line::from(" Arrows: Scroll board viewport"),
         Line::from(""),
         Line::from(Span::styled(
@@ -557,6 +623,18 @@ fn render_help_popup(app: &App, frame: &mut Frame) {
         Line::from(" Tab/Shift+Tab: Navigate color palette"),
         Line::from(" s: Save current art to file (prompts for name)"),
         Line::from(" Esc: Exit editor (changes not saved automatically)"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "--- Work Queue System (enter with 'w') ---",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(" w: Open work queue management"),
+        Line::from(" +: Add loaded art to queue at current position"),
+        Line::from(" Q: Start automated queue processing"),
+        Line::from(" 1-5: Set priority for selected queue item"),
+        Line::from(" d/Del: Remove item from queue"),
+        Line::from(" c: Clear entire queue"),
+        Line::from(" ↑/↓: Navigate queue items"),
         Line::from(""),
         Line::from(Span::styled(
             "--- Input Fields (Tokens, Filenames, etc.) ---",
@@ -816,4 +894,314 @@ fn render_profile_popup(app: &App, frame: &mut Frame) {
 
     frame.render_widget(Clear, popup_area);
     frame.render_widget(profile_paragraph, popup_area);
+}
+
+/// Render the art selection UI with previews
+fn render_art_selection_ui(app: &App, frame: &mut Frame, area: Rect) {
+    if app.available_pixel_arts.is_empty() {
+        let empty_message = Paragraph::new("No pixel arts available").block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Art Selection"),
+        );
+        frame.render_widget(empty_message, area);
+        return;
+    }
+
+    let selection_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(50), // Art list
+            Constraint::Percentage(50), // Preview
+        ])
+        .split(area);
+
+    // Render art list on the left
+    let art_items: Vec<ListItem> = app
+        .available_pixel_arts
+        .iter()
+        .enumerate()
+        .map(|(idx, art)| {
+            let dimensions = crate::art::get_art_dimensions(art);
+            let item_text = format!(
+                "{} ({}x{}, {} pixels)",
+                art.name,
+                dimensions.0,
+                dimensions.1,
+                art.pixels.len()
+            );
+
+            if idx == app.art_selection_index {
+                ListItem::new(item_text).style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                ListItem::new(item_text)
+            }
+        })
+        .collect();
+
+    let art_list = List::new(art_items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Select Pixel Art (Enter to load, q to quit)"),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▶ ");
+
+    let mut list_state = ListState::default();
+    list_state.select(Some(app.art_selection_index));
+
+    frame.render_stateful_widget(art_list, selection_layout[0], &mut list_state);
+
+    // Render preview on the right
+    if let Some(selected_art) = app.available_pixel_arts.get(app.art_selection_index) {
+        render_art_preview(selected_art, app, frame, selection_layout[1]);
+    }
+}
+
+/// Render a preview of a pixel art
+fn render_art_preview(art: &crate::art::PixelArt, app: &App, frame: &mut Frame, area: Rect) {
+    let preview_block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!("Preview: {}", art.name));
+    frame.render_widget(preview_block.clone(), area);
+
+    let inner_area = area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+
+    if art.pixels.is_empty() {
+        let empty_preview = Paragraph::new("(Empty art)").style(Style::default().fg(Color::Gray));
+        frame.render_widget(empty_preview, inner_area);
+        return;
+    }
+
+    // Calculate art bounds
+    let dimensions = crate::art::get_art_dimensions(art);
+    let art_width = dimensions.0 as u16;
+    let art_height = dimensions.1 as u16;
+
+    // Scale preview to fit available space
+    let max_preview_width = inner_area.width;
+    let max_preview_height = inner_area.height * 2; // Since we use half-blocks
+
+    let scale_x = if art_width == 0 {
+        1.0
+    } else {
+        max_preview_width as f32 / art_width as f32
+    };
+    let scale_y = if art_height == 0 {
+        1.0
+    } else {
+        max_preview_height as f32 / art_height as f32
+    };
+    let scale = scale_x.min(scale_y).min(1.0); // Don't scale up, only down
+
+    let preview_width = (art_width as f32 * scale) as u16;
+    let preview_height = ((art_height as f32 * scale) / 2.0) as u16; // Divide by 2 for half-blocks
+
+    // Center the preview
+    let start_x = inner_area.x + (inner_area.width.saturating_sub(preview_width)) / 2;
+    let start_y = inner_area.y + (inner_area.height.saturating_sub(preview_height)) / 2;
+
+    // Render the art preview using half-blocks
+    for screen_y in 0..preview_height {
+        for screen_x in 0..preview_width {
+            let art_pixel_y_top = ((screen_y * 2) as f32 / scale) as i32;
+            let art_pixel_y_bottom = art_pixel_y_top + (1.0 / scale) as i32;
+            let art_pixel_x = (screen_x as f32 / scale) as i32;
+
+            let top_pixel_color = art
+                .pixels
+                .iter()
+                .find(|p| p.x == art_pixel_x && p.y == art_pixel_y_top)
+                .map(|p| get_ratatui_color(app, p.color_id, Color::DarkGray))
+                .unwrap_or(Color::DarkGray);
+
+            let bottom_pixel_color = art
+                .pixels
+                .iter()
+                .find(|p| p.x == art_pixel_x && p.y == art_pixel_y_bottom)
+                .map(|p| get_ratatui_color(app, p.color_id, Color::DarkGray))
+                .unwrap_or(Color::DarkGray);
+
+            let cell_char = '▀';
+            let style = Style::default().fg(top_pixel_color).bg(bottom_pixel_color);
+
+            if start_x + screen_x < frame.size().width && start_y + screen_y < frame.size().height {
+                frame
+                    .buffer_mut()
+                    .get_mut(start_x + screen_x, start_y + screen_y)
+                    .set_char(cell_char)
+                    .set_style(style);
+            }
+        }
+    }
+}
+
+/// Render the art queue management UI
+fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
+    if app.art_queue.is_empty() {
+        let empty_message = Paragraph::new(vec![
+            Line::from("Queue is empty"),
+            Line::from(""),
+            Line::from("Controls:"),
+            Line::from("  + : Add currently loaded art to queue"),
+            Line::from("  l : Load art to add to queue"),
+            Line::from("  Esc : Return to main view"),
+        ])
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Art Queue Management"),
+        );
+        frame.render_widget(empty_message, area);
+        return;
+    }
+
+    let queue_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(70), // Queue list
+            Constraint::Percentage(30), // Controls/Info
+        ])
+        .split(area);
+
+    // Render queue list
+    let queue_items: Vec<ListItem> = app
+        .art_queue
+        .iter()
+        .enumerate()
+        .map(|(idx, item)| {
+            let status_symbol = match item.status {
+                crate::app_state::QueueStatus::Pending => "⏳",
+                crate::app_state::QueueStatus::InProgress => "🚀",
+                crate::app_state::QueueStatus::Complete => "✅",
+                crate::app_state::QueueStatus::Skipped => "⏭️",
+                crate::app_state::QueueStatus::Failed => "❌",
+            };
+
+            let priority_color = match item.priority {
+                1 => Color::Red,
+                2 => Color::Yellow,
+                3 => Color::Cyan,
+                4 => Color::Green,
+                5 => Color::Blue,
+                _ => Color::White,
+            };
+
+            let progress = if item.pixels_total > 0 {
+                format!(" {}/{}", item.pixels_placed, item.pixels_total)
+            } else {
+                String::new()
+            };
+
+            let item_text = format!(
+                "{} P{} '{}' @ ({},{}){}",
+                status_symbol,
+                item.priority,
+                item.art.name,
+                item.art.board_x,
+                item.art.board_y,
+                progress
+            );
+
+            let mut list_item = ListItem::new(item_text);
+            if idx == app.queue_selection_index {
+                list_item = list_item.style(
+                    Style::default()
+                        .bg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD),
+                );
+            }
+
+            list_item.style(Style::default().fg(priority_color))
+        })
+        .collect();
+
+    let queue_list = List::new(queue_items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!("Art Queue ({} items)", app.art_queue.len())),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▶ ");
+
+    let mut list_state = ListState::default();
+    list_state.select(Some(app.queue_selection_index));
+
+    frame.render_stateful_widget(queue_list, queue_layout[0], &mut list_state);
+
+    // Render controls and info panel
+    let pending_count = app
+        .art_queue
+        .iter()
+        .filter(|item| item.status == crate::app_state::QueueStatus::Pending)
+        .count();
+
+    let total_pixels = app
+        .art_queue
+        .iter()
+        .filter(|item| item.status == crate::app_state::QueueStatus::Pending)
+        .map(|item| item.pixels_total)
+        .sum::<usize>();
+
+    let controls_text = vec![
+        Line::from(Span::styled(
+            "Queue Statistics",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(format!("Pending: {}", pending_count)),
+        Line::from(format!("Total Pixels: {}", total_pixels)),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Controls",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from("↑/↓  : Navigate queue"),
+        Line::from("+    : Add loaded art"),
+        Line::from("Q    : Start processing"),
+        Line::from("1-5  : Set priority"),
+        Line::from("d/Del: Remove item"),
+        Line::from("c    : Clear queue"),
+        Line::from("Esc  : Exit queue view"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Priority Colors",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(vec![
+            Span::styled("1-High ", Style::default().fg(Color::Red)),
+            Span::styled("2-Med+ ", Style::default().fg(Color::Yellow)),
+            Span::styled("3-Med ", Style::default().fg(Color::Cyan)),
+        ]),
+        Line::from(vec![
+            Span::styled("4-Low+ ", Style::default().fg(Color::Green)),
+            Span::styled("5-Low ", Style::default().fg(Color::Blue)),
+        ]),
+    ];
+
+    let controls_paragraph = Paragraph::new(controls_text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Info & Controls"),
+        )
+        .wrap(Wrap { trim: false });
+
+    frame.render_widget(controls_paragraph, queue_layout[1]);
 }
