@@ -10,7 +10,7 @@ use ratatui::prelude::*;
 mod api_client;
 mod app_state;
 mod art;
-mod event_handler;
+mod event_handling;
 mod token_storage;
 mod ui;
 use api_client::ApiClient;
