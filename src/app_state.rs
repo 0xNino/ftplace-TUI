@@ -1,5 +1,6 @@
 use crate::api_client::{ApiClient, ColorInfo, PixelNetwork, UserInfos};
 use crate::art::PixelArt;
+use crate::token_storage::TokenStorage;
 use std::time::Instant;
 
 #[derive(Debug, PartialEq, Eq, Default)]
@@ -20,6 +21,7 @@ pub enum InputMode {
 pub struct App {
     pub exit: bool,
     pub api_client: ApiClient,
+    pub token_storage: TokenStorage,
     pub input_mode: InputMode,
     pub input_buffer: String, // Generic input buffer (renamed from cookie_input_buffer for clarity)
     pub status_message: String, // To display messages to the user
@@ -31,6 +33,7 @@ pub struct App {
     pub board_viewport_y: u16,       // Y offset of the viewport in pixel rows (top row of the pair)
     pub initial_board_fetched: bool, // New flag
     pub last_board_refresh: Option<Instant>, // For auto-refresh
+    pub should_fetch_board_on_start: bool, // Flag to trigger board fetch when tokens are restored
 
     // State for Base URL selection
     pub base_url_options: Vec<String>,

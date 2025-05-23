@@ -10,13 +10,33 @@ mod api_client;
 mod app_state;
 mod art;
 mod event_handler;
+mod token_storage;
 mod ui;
 use api_client::ApiClient;
 use app_state::{App, InputMode};
+use token_storage::TokenStorage;
 
 impl App {
     pub fn new() -> Self {
-        let api_client = ApiClient::new(None, None, None);
+        // Initialize token storage
+        let token_storage = match TokenStorage::new() {
+            Ok(storage) => storage,
+            Err(e) => {
+                eprintln!("Warning: Could not initialize token storage: {}", e);
+                // Create a temporary storage that will work but not persist
+                TokenStorage::new().unwrap_or_else(|_| panic!("Failed to create token storage"))
+            }
+        };
+
+        // Load saved tokens
+        let saved_tokens = token_storage.load();
+
+        // Initialize API client with saved tokens and base URL
+        let api_client = ApiClient::new(
+            saved_tokens.base_url.clone(),
+            saved_tokens.access_token.clone(),
+            saved_tokens.refresh_token.clone(),
+        );
 
         let base_url_options = vec![
             "https://ftplace.42lausanne.ch".to_string(),
@@ -24,12 +44,36 @@ impl App {
             "Custom".to_string(),
         ];
 
+        // Determine initial input mode based on saved data
+        let (initial_mode, initial_message, should_fetch_on_start) =
+            if saved_tokens.base_url.is_some()
+                && (saved_tokens.access_token.is_some() || saved_tokens.refresh_token.is_some())
+            {
+                // Have saved config, go directly to help/main view and fetch board
+                (
+                    InputMode::ShowHelp,
+                    format!(
+                        "Restored session: {}. Press any key to continue or 'c' to reconfigure.",
+                        saved_tokens.base_url.as_deref().unwrap_or("Unknown URL")
+                    ),
+                    true, // Trigger board fetch
+                )
+            } else {
+                // No saved config, start with URL selection
+                (
+                    InputMode::EnterBaseUrl,
+                    "Select API Base URL or choose Custom:".to_string(),
+                    false, // Don't fetch board yet
+                )
+            };
+
         Self {
             exit: false,
             api_client,
-            input_mode: InputMode::EnterBaseUrl,
+            token_storage,
+            input_mode: initial_mode,
             input_buffer: String::new(),
-            status_message: "Select API Base URL or choose Custom:".to_string(),
+            status_message: initial_message,
             board: Vec::new(),
             colors: Vec::new(),
             user_info: None,
@@ -38,6 +82,7 @@ impl App {
             board_viewport_y: 0,
             initial_board_fetched: false,
             last_board_refresh: None,
+            should_fetch_board_on_start: should_fetch_on_start,
             base_url_options,
             base_url_selection_index: 0,
             current_editing_art: None,

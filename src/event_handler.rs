@@ -10,6 +10,12 @@ use std::time::{Duration, Instant};
 
 impl App {
     pub async fn handle_events(&mut self) -> io::Result<()> {
+        // Check if we need to fetch board on startup (when tokens were restored)
+        if self.should_fetch_board_on_start {
+            self.should_fetch_board_on_start = false; // Clear the flag
+            self.fetch_board_data().await;
+        }
+
         let mut should_refresh_board = false;
         if self.input_mode == InputMode::None
             && self.initial_board_fetched
@@ -59,6 +65,8 @@ impl App {
                                             self.input_mode = InputMode::EnterAccessToken;
                                             self.status_message = "Base URL set. Enter Access Token (or Enter to skip):".to_string();
                                             self.input_buffer.clear();
+                                            // Save the base URL immediately
+                                            self.save_tokens();
                                         }
                                     }
                                     KeyCode::Char('q') => self.exit = true,
@@ -80,6 +88,8 @@ impl App {
                                             self.input_mode = InputMode::EnterAccessToken;
                                             self.status_message = "Base URL set. Enter Access Token (or Enter to skip):".to_string();
                                             self.input_buffer.clear();
+                                            // Save the base URL immediately
+                                            self.save_tokens();
                                         }
                                     }
                                     KeyCode::Esc => {
@@ -109,6 +119,8 @@ impl App {
                                     }
                                     self.input_mode = InputMode::EnterRefreshToken;
                                     self.input_buffer.clear();
+                                    // Save tokens after setting access token
+                                    self.save_tokens();
                                 }
                                 KeyCode::Esc => {
                                     self.input_mode = InputMode::EnterBaseUrl;
@@ -138,6 +150,8 @@ impl App {
                                     if !self.initial_board_fetched {
                                         self.fetch_board_data().await;
                                     }
+                                    // Save tokens after setting refresh token (final step)
+                                    self.save_tokens();
                                 }
                                 KeyCode::Esc => {
                                     self.input_mode = InputMode::EnterAccessToken;
@@ -404,16 +418,22 @@ impl App {
                 if !self.initial_board_fetched {
                     self.initial_board_fetched = true;
                 }
+                // Save tokens in case they were refreshed during the API call
+                self.save_tokens();
             }
             Err(e) => {
                 match e {
                     ApiError::Unauthorized => {
                         self.status_message = "Session expired or cookie invalid. Auto-refresh paused. Enter new tokens or restart.".to_string();
                         self.api_client.clear_tokens();
+                        // Clear saved tokens when session expires
+                        self.clear_saved_tokens();
                     }
                     _ => {
-                        self.status_message =
-                            format!("Error fetching board: {:?}. Try 'r' to refresh.", e);
+                        // Use enhanced error display for API errors
+                        self.handle_api_error_with_enhanced_display("Error fetching board", &e)
+                            .await;
+                        self.status_message.push_str(" Try 'r' to refresh.");
                     }
                 }
                 self.last_board_refresh = Some(Instant::now());
@@ -441,6 +461,8 @@ impl App {
                     info.timers.as_ref().map_or(0, |v| v.len())
                 );
                 self.user_info = Some(info);
+                // Save tokens in case they were refreshed during the API call
+                self.save_tokens();
             }
             Err(e) => {
                 self.user_info = None;
@@ -449,7 +471,9 @@ impl App {
                         self.status_message = "Error fetching profile: Unauthorized. Access Token might be invalid or expired. Try 'c' to update.".to_string();
                     }
                     _ => {
-                        self.status_message = format!("Error fetching profile: {:?}", e);
+                        // Use enhanced error display for API errors
+                        self.handle_api_error_with_enhanced_display("Error fetching profile", &e)
+                            .await;
                     }
                 }
             }
@@ -519,51 +543,47 @@ impl App {
                     self.user_info = Some(response.user_infos);
                 }
                 Err(e) => {
-                    let mut error_message = format!(
-                        "Error placing pixel {}/{} at ({},{}): {:?}.",
+                    // Use enhanced error display that utilizes timers and interval fields
+                    let base_message = format!(
+                        "Error placing pixel {}/{} at ({},{})",
                         index + 1,
                         total_pixels,
                         abs_x,
-                        abs_y,
-                        e
+                        abs_y
                     );
-                    match e {
+
+                    // Check if it's unauthorized first for token clearing
+                    match &e {
                         ApiError::Unauthorized
                         | ApiError::ApiErrorResponse {
                             status: reqwest::StatusCode::UNAUTHORIZED,
                             ..
                         } => {
                             self.api_client.clear_tokens();
-                            let cleared_message =
-                                "Authentication failed (tokens expired or invalid). Tokens cleared from app.".to_string();
-                            error_message = format!("{} Please use --access-token and --refresh-token arguments or restart with new tokens via CLI. Halting placement.", cleared_message);
-                            self.status_message = error_message;
+                            self.status_message = format!(
+                                "{}: Authentication failed. Tokens cleared. Please restart with valid tokens. Halting placement.",
+                                base_message
+                            );
                             return;
                         }
-                        ApiError::ApiErrorResponse {
-                            status,
-                            error_response,
-                        } => {
-                            if status == reqwest::StatusCode::TOO_MANY_REQUESTS
-                                || status.as_u16() == 425
-                                || status.as_u16() == 420
-                            {
-                                self.status_message = format!(
-                                    "Cooldown hit while placing pixel {}/{}: {}. Refreshing board to see timers...",
-                                    index + 1,
-                                    total_pixels,
-                                    error_response.message
-                                );
-                                self.fetch_board_data().await;
-                                return;
-                            }
-                            error_message.push_str(" Halting placement.");
-                        }
-                        _ => {
-                            error_message.push_str(" Halting placement.");
+                        _ => {}
+                    }
+
+                    // Use enhanced error display for all other errors
+                    self.handle_api_error_with_enhanced_display(&base_message, &e)
+                        .await;
+
+                    // For rate limiting errors, don't halt placement - let enhanced display handle it
+                    if let ApiError::ApiErrorResponse { status, .. } = &e {
+                        if status == &reqwest::StatusCode::TOO_MANY_REQUESTS
+                            || status.as_u16() == 425
+                            || status.as_u16() == 420
+                        {
+                            // Enhanced display already updated user timers, just refresh board
+                            self.fetch_board_data().await;
                         }
                     }
-                    self.status_message = error_message;
+
                     return;
                 }
             }
@@ -622,6 +642,120 @@ impl App {
             }
         } else {
             self.status_message = "No current art to save.".to_string();
+        }
+    }
+
+    /// Save current tokens and base URL to persistent storage
+    fn save_tokens(&mut self) {
+        let token_data = crate::token_storage::TokenData {
+            access_token: self.api_client.get_access_token_clone(),
+            refresh_token: self.api_client.get_refresh_token_clone(),
+            base_url: Some(self.api_client.get_base_url()),
+        };
+
+        if let Err(e) = self.token_storage.save(&token_data) {
+            eprintln!("Warning: Could not save tokens: {}", e);
+        }
+    }
+
+    /// Clear saved tokens from persistent storage
+    fn clear_saved_tokens(&mut self) {
+        if let Err(e) = self.token_storage.clear() {
+            eprintln!("Warning: Could not clear saved tokens: {}", e);
+        }
+    }
+
+    /// Check if tokens were refreshed and save them if needed
+    async fn check_and_save_refreshed_tokens(&mut self) {
+        // This will be called after API operations that might refresh tokens
+        self.save_tokens();
+    }
+
+    /// Enhanced error message formatting that utilizes timers and interval from ApiErrorResponse
+    fn format_enhanced_error_message(
+        &self,
+        base_message: &str,
+        status: &reqwest::StatusCode,
+        error_response: &crate::api_client::ApiErrorResponse,
+    ) -> String {
+        let mut enhanced_message = format!("{}: {}", base_message, error_response.message);
+
+        // Add timer information if available
+        if let Some(timers) = &error_response.timers {
+            if !timers.is_empty() {
+                enhanced_message.push_str(" | Active Timers: ");
+                let timer_strings: Vec<String> = timers
+                    .iter()
+                    .enumerate()
+                    .map(|(i, timer)| {
+                        let time_remaining = (*timer as f64 / 1000.0)
+                            - (chrono::Utc::now().timestamp_millis() as f64 / 1000.0);
+                        if time_remaining > 0.0 {
+                            format!("T{}({:.1}s)", i + 1, time_remaining)
+                        } else {
+                            format!("T{}(expired)", i + 1)
+                        }
+                    })
+                    .collect();
+                enhanced_message.push_str(&timer_strings.join(", "));
+            }
+        }
+
+        // Add interval information for cooldown errors
+        if let Some(interval) = error_response.interval {
+            let interval_seconds = interval as f64 / 1000.0;
+            enhanced_message.push_str(&format!(" | Retry Interval: {:.1}s", interval_seconds));
+        }
+
+        // Add specific guidance based on status code
+        match status.as_u16() {
+            420 => enhanced_message.push_str(" | Status: Enhance Your Hype (cooldown active)"),
+            425 => enhanced_message.push_str(" | Status: Too Early (rate limited)"),
+            429 => enhanced_message.push_str(" | Status: Too Many Requests (rate limited)"),
+            _ => {}
+        }
+
+        enhanced_message
+    }
+
+    /// Enhanced error handling for API operations that uses the ApiErrorResponse fields
+    async fn handle_api_error_with_enhanced_display(
+        &mut self,
+        base_message: &str,
+        error: &crate::api_client::ApiError,
+    ) {
+        match error {
+            crate::api_client::ApiError::ApiErrorResponse {
+                status,
+                error_response,
+            } => {
+                let enhanced_message =
+                    self.format_enhanced_error_message(base_message, status, error_response);
+
+                // For rate limiting errors, update user info with new timers if available
+                if *status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                    || status.as_u16() == 425
+                    || status.as_u16() == 420
+                {
+                    if let Some(timers) = &error_response.timers {
+                        if let Some(user_info) = &mut self.user_info {
+                            user_info.timers = Some(timers.clone());
+                        }
+                    }
+                }
+
+                self.status_message = enhanced_message;
+            }
+            crate::api_client::ApiError::Unauthorized => {
+                self.status_message = format!(
+                    "{}: Unauthorized access. Please check your tokens.",
+                    base_message
+                );
+                self.api_client.clear_tokens();
+            }
+            _ => {
+                self.status_message = format!("{}: {:?}", base_message, error);
+            }
         }
     }
 }

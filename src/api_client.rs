@@ -169,6 +169,45 @@ impl ApiClient {
         }
     }
 
+    pub fn get_base_url_config_display(&self) -> String {
+        // Better display for config that doesn't cut off ports poorly
+        if self.base_url.len() <= 35 {
+            // Show full URL if it's reasonably short
+            self.base_url.clone()
+        } else if self.base_url.starts_with("https://") {
+            // For long HTTPS URLs, show protocol + domain + "..."
+            let without_protocol = &self.base_url[8..]; // Remove "https://"
+            if let Some(slash_pos) = without_protocol.find('/') {
+                format!("https://{}...", &without_protocol[..slash_pos])
+            } else if without_protocol.len() > 25 {
+                format!("https://{}...", &without_protocol[..22])
+            } else {
+                self.base_url.clone()
+            }
+        } else if self.base_url.starts_with("http://") {
+            // For long HTTP URLs, show protocol + domain + "..."
+            let without_protocol = &self.base_url[7..]; // Remove "http://"
+            if let Some(slash_pos) = without_protocol.find('/') {
+                format!("http://{}...", &without_protocol[..slash_pos])
+            } else if without_protocol.len() > 26 {
+                format!("http://{}...", &without_protocol[..23])
+            } else {
+                self.base_url.clone()
+            }
+        } else {
+            // For other protocols, just truncate normally
+            if self.base_url.len() > 35 {
+                format!("{}...", &self.base_url[..32])
+            } else {
+                self.base_url.clone()
+            }
+        }
+    }
+
+    pub fn get_base_url(&self) -> String {
+        self.base_url.clone()
+    }
+
     pub fn get_auth_cookie_preview(&self) -> Option<String> {
         self.access_token.as_ref().map(|s| {
             let len = s.len();

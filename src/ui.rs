@@ -59,7 +59,8 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
         }
         _ => {
             // For InputMode::None or ArtEditor modes, show current config (simplified)
-            let mut display_text = format!("Base: {}", app.api_client.get_base_url_preview());
+            let mut display_text =
+                format!("Base: {}", app.api_client.get_base_url_config_display());
             if let Some(token_preview) = app.api_client.get_auth_cookie_preview() {
                 display_text.push_str(&format!("; Token: [{}...]", token_preview));
             } else {
@@ -623,8 +624,12 @@ fn render_profile_popup(app: &App, frame: &mut Frame) {
             )));
 
             if let Some(iat) = user_info.iat {
-                let iat_time = chrono::DateTime::from_timestamp_millis(iat)
-                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                let iat_time = chrono::DateTime::from_timestamp(iat, 0)
+                    .map(|dt| {
+                        (dt + chrono::Duration::hours(2))
+                            .format("%Y-%m-%d %H:%M:%S UTC+2")
+                            .to_string()
+                    })
                     .unwrap_or_else(|| "Invalid timestamp".to_string());
                 lines.push(Line::from(vec![
                     Span::styled(
@@ -636,8 +641,12 @@ fn render_profile_popup(app: &App, frame: &mut Frame) {
             }
 
             if let Some(exp) = user_info.exp {
-                let exp_time = chrono::DateTime::from_timestamp_millis(exp)
-                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                let exp_time = chrono::DateTime::from_timestamp(exp, 0)
+                    .map(|dt| {
+                        (dt + chrono::Duration::hours(2))
+                            .format("%Y-%m-%d %H:%M:%S UTC+2")
+                            .to_string()
+                    })
                     .unwrap_or_else(|| "Invalid timestamp".to_string());
                 lines.push(Line::from(vec![
                     Span::styled(
@@ -662,8 +671,12 @@ fn render_profile_popup(app: &App, frame: &mut Frame) {
                 )));
 
                 for (i, timer) in timers.iter().enumerate() {
-                    let timer_time = chrono::DateTime::from_timestamp_millis(*timer)
-                        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                    let timer_time = chrono::DateTime::from_timestamp(*timer, 0)
+                        .map(|dt| {
+                            (dt + chrono::Duration::hours(2))
+                                .format("%Y-%m-%d %H:%M:%S UTC+2")
+                                .to_string()
+                        })
                         .unwrap_or_else(|| "Invalid timestamp".to_string());
                     lines.push(Line::from(vec![
                         Span::styled(
