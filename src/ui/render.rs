@@ -1,0 +1,410 @@
+use crate::app_state::{App, InputMode};
+use crate::ui::art_editor::render_art_editor_ui;
+use crate::ui::art_management::{render_art_queue_ui, render_art_selection_ui};
+use crate::ui::helpers::{
+    get_current_board_color_ui, get_ratatui_color, is_pixel_already_correct_ui,
+};
+use crate::ui::popups::{render_help_popup, render_profile_popup};
+use ratatui::prelude::*;
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
+
+pub fn render_ui(app: &mut App, frame: &mut Frame) {
+    let main_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5), // Increased height for Base URL selection list or input
+            Constraint::Min(0),    // Board Display or Art Editor
+            Constraint::Length(5), // Controls / Status
+        ])
+        .split(frame.size());
+
+    // --- Input Area (Top) ---
+    let input_area_rect = main_layout[0];
+    match app.input_mode {
+        InputMode::EnterBaseUrl => {
+            let items: Vec<ListItem> = app
+                .base_url_options
+                .iter()
+                .map(|opt| ListItem::new(opt.as_str()))
+                .collect();
+
+            let list_widget = List::new(items)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Select API Base URL (Enter to confirm, q to quit):"),
+                )
+                .highlight_style(
+                    Style::default()
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::LightBlue),
+                )
+                .highlight_symbol("> ");
+
+            let mut list_state = ListState::default();
+            list_state.select(Some(app.base_url_selection_index));
+
+            frame.render_stateful_widget(list_widget, input_area_rect, &mut list_state);
+        }
+        InputMode::EnterCustomBaseUrlText
+        | InputMode::EnterAccessToken
+        | InputMode::EnterRefreshToken
+        | InputMode::ArtEditorNewArtName => {
+            let title = match app.input_mode {
+                InputMode::EnterCustomBaseUrlText => "Custom Base URL (Editing):",
+                InputMode::EnterAccessToken => "Access Token (Editing):",
+                InputMode::EnterRefreshToken => "Refresh Token (Editing):",
+                InputMode::ArtEditorNewArtName => "New Pixel Art Name (Editing):",
+                _ => "Input:", // Should not happen if logic is correct
+            };
+            let input_widget = Paragraph::new(app.input_buffer.as_str())
+                .block(Block::default().borders(Borders::ALL).title(title));
+            frame.render_widget(input_widget, input_area_rect);
+            frame.set_cursor(
+                input_area_rect.x + app.input_buffer.chars().count() as u16 + 1,
+                input_area_rect.y + 1,
+            );
+        }
+        InputMode::ArtSelection => {
+            render_art_selection_ui(app, frame, input_area_rect);
+        }
+        InputMode::ArtQueue => {
+            render_art_queue_ui(app, frame, input_area_rect);
+        }
+        _ => {
+            // For InputMode::None or ArtEditor modes, show current config (simplified)
+            let mut display_text =
+                format!("Base: {}", app.api_client.get_base_url_config_display());
+            if let Some(token_preview) = app.api_client.get_auth_cookie_preview() {
+                display_text.push_str(&format!("; Token: [{}...]", token_preview));
+            } else {
+                display_text.push_str("; Token: [not set]");
+            }
+            let config_display_widget = Paragraph::new(display_text).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Current Config (c to edit AccessToken)"),
+            );
+            frame.render_widget(config_display_widget, input_area_rect);
+        }
+    }
+
+    // --- Board Display Area or Art Editor Area (main_layout[1]) ---
+    match app.input_mode {
+        InputMode::ArtEditor => {
+            render_art_editor_ui(app, frame, main_layout[1]);
+        }
+        _ => {
+            // Includes EnterBaseUrl, EnterCustomBaseUrlText, EnterAccessToken, EnterRefreshToken, None
+            render_board_display(app, frame, main_layout[1]);
+        }
+    }
+
+    // --- Status Message Area (main_layout[2]) ---
+    render_status_area(app, frame, main_layout[2]);
+
+    // Cursor handling is now within specific input mode rendering logic above for text input
+    // or handled by ListState for selection.
+
+    // If ShowHelp mode is active, render the help popup on top of everything else
+    if app.input_mode == InputMode::ShowHelp {
+        render_help_popup(app, frame);
+    }
+
+    // If ShowProfile mode is active, render the profile popup on top of everything else
+    if app.input_mode == InputMode::ShowProfile {
+        render_profile_popup(app, frame);
+    }
+}
+
+fn render_board_display(app: &mut App, frame: &mut Frame, area: Rect) {
+    let board_title = if app.board_loading {
+        let elapsed = app
+            .board_load_start
+            .map(|start| start.elapsed().as_secs())
+            .unwrap_or(0);
+        format!(
+            "Board Display - Loading... ({}s) - Size {}x{}",
+            elapsed,
+            app.board.len(),
+            if app.board.is_empty() {
+                0
+            } else {
+                app.board[0].len()
+            }
+        )
+    } else {
+        format!(
+            "Board Display (Viewport @ {},{} - Size {}x{})",
+            app.board_viewport_x,
+            app.board_viewport_y,
+            app.board.len(),
+            if app.board.is_empty() {
+                0
+            } else {
+                app.board[0].len()
+            }
+        )
+    };
+
+    let board_block = Block::default().borders(Borders::ALL).title(board_title);
+    frame.render_widget(board_block, area);
+
+    let inner_board_area = area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+
+    // Clamp viewport coordinates
+    let board_pixel_width = app.board.len();
+    let board_pixel_height = if board_pixel_width > 0 {
+        app.board[0].len()
+    } else {
+        0
+    };
+
+    if board_pixel_height > (inner_board_area.height * 2) as usize {
+        let max_scroll_y_pixels =
+            (board_pixel_height - (inner_board_area.height * 2) as usize) as u16;
+        app.board_viewport_y = app.board_viewport_y.min(max_scroll_y_pixels);
+    } else {
+        app.board_viewport_y = 0;
+    }
+    if board_pixel_width > inner_board_area.width as usize {
+        let max_scroll_x_pixels = (board_pixel_width - inner_board_area.width as usize) as u16;
+        app.board_viewport_x = app.board_viewport_x.min(max_scroll_x_pixels);
+    } else {
+        app.board_viewport_x = 0;
+    }
+
+    let default_board_color_info = app.colors.iter().find(|c| c.id == 1);
+    let default_board_rgb =
+        default_board_color_info.map_or(Color::Black, |ci| Color::Rgb(ci.red, ci.green, ci.blue)); // Fallback to Black if color 1 not found
+
+    if !app.board.is_empty() && !app.colors.is_empty() {
+        for y_screen_cell in 0..inner_board_area.height {
+            for x_screen_cell in 0..inner_board_area.width {
+                let board_px_x = app.board_viewport_x as usize + x_screen_cell as usize;
+                let board_px_y_top = app.board_viewport_y as usize + (y_screen_cell * 2) as usize;
+                let board_px_y_bottom = board_px_y_top + 1;
+
+                let top_pixel_color = if board_px_x < app.board.len()
+                    && board_px_y_top < app.board[board_px_x].len()
+                {
+                    app.board[board_px_x][board_px_y_top]
+                        .as_ref()
+                        .map_or(default_board_rgb, |p| {
+                            get_ratatui_color(app, p.c, default_board_rgb)
+                        })
+                } else {
+                    default_board_rgb // Out of bounds for top pixel
+                };
+
+                let bottom_pixel_color = if board_px_x < app.board.len()
+                    && board_px_y_bottom < app.board[board_px_x].len()
+                {
+                    app.board[board_px_x][board_px_y_bottom]
+                        .as_ref()
+                        .map_or(default_board_rgb, |p| {
+                            get_ratatui_color(app, p.c, default_board_rgb)
+                        })
+                } else {
+                    default_board_rgb // Out of bounds for bottom pixel, or if board has odd height and this is the last cell row
+                };
+
+                let cell_char = '▀';
+                let style = Style::default().fg(top_pixel_color).bg(bottom_pixel_color);
+
+                frame
+                    .buffer_mut()
+                    .get_mut(
+                        inner_board_area.x + x_screen_cell,
+                        inner_board_area.y + y_screen_cell,
+                    )
+                    .set_char(cell_char)
+                    .set_style(style);
+            }
+        }
+    }
+
+    // Overlay loaded_art if present - this needs to be aware of the half-blocks and viewport
+    if let Some(art) = &app.loaded_art {
+        render_loaded_art_overlay(app, frame, &inner_board_area, art);
+    }
+
+    // Overlay queue previews with progress-aware visual feedback
+    if !app.art_queue.is_empty() {
+        render_queue_overlay(app, frame, &inner_board_area);
+    }
+}
+
+fn render_loaded_art_overlay(
+    app: &App,
+    frame: &mut Frame,
+    inner_board_area: &Rect,
+    art: &crate::art::PixelArt,
+) {
+    for art_pixel in &art.pixels {
+        let art_abs_x = art.board_x + art_pixel.x;
+        let art_abs_y = art.board_y + art_pixel.y;
+
+        // Is this art pixel visible in the current viewport?
+        if art_abs_x >= app.board_viewport_x as i32
+            && art_abs_x < (app.board_viewport_x + inner_board_area.width) as i32
+            && art_abs_y >= app.board_viewport_y as i32
+            && art_abs_y < (app.board_viewport_y + inner_board_area.height * 2) as i32
+        {
+            let screen_cell_x = (art_abs_x - app.board_viewport_x as i32) as u16;
+            // art_abs_y is the pixel row. The cell row is (art_abs_y - viewport_y) / 2
+            let screen_cell_y = ((art_abs_y - app.board_viewport_y as i32) / 2) as u16;
+
+            let target_abs_screen_x = inner_board_area.x + screen_cell_x;
+            let target_abs_screen_y = inner_board_area.y + screen_cell_y;
+
+            // Ensure the target cell is within the drawable inner_board_area bounds
+            if screen_cell_x < inner_board_area.width && screen_cell_y < inner_board_area.height {
+                let art_color = get_ratatui_color(app, art_pixel.color_id, Color::Magenta);
+                let cell = frame
+                    .buffer_mut()
+                    .get_mut(target_abs_screen_x, target_abs_screen_y);
+
+                cell.set_char('▀');
+                if (art_abs_y - app.board_viewport_y as i32) % 2 == 0 {
+                    cell.set_fg(art_color);
+                } else {
+                    cell.set_bg(art_color);
+                }
+            }
+        }
+    }
+}
+
+fn render_queue_overlay(app: &App, frame: &mut Frame, inner_board_area: &Rect) {
+    for queue_item in &app.art_queue {
+        // Show all queue items (pending, in progress, complete)
+        if queue_item.status == crate::app_state::QueueStatus::Failed
+            || queue_item.status == crate::app_state::QueueStatus::Skipped
+        {
+            continue; // Don't show failed/skipped items
+        }
+
+        // Filter meaningful pixels for this queue item
+        let meaningful_pixels: Vec<_> = queue_item.art.pixels.iter().enumerate().collect();
+
+        for (pixel_index, art_pixel) in meaningful_pixels {
+            let art_abs_x = queue_item.art.board_x + art_pixel.x;
+            let art_abs_y = queue_item.art.board_y + art_pixel.y;
+
+            // Is this art pixel visible in the current viewport?
+            if art_abs_x >= app.board_viewport_x as i32
+                && art_abs_x < (app.board_viewport_x + inner_board_area.width) as i32
+                && art_abs_y >= app.board_viewport_y as i32
+                && art_abs_y < (app.board_viewport_y + inner_board_area.height * 2) as i32
+            {
+                let screen_cell_x = (art_abs_x - app.board_viewport_x as i32) as u16;
+                let screen_cell_y = ((art_abs_y - app.board_viewport_y as i32) / 2) as u16;
+
+                let target_abs_screen_x = inner_board_area.x + screen_cell_x;
+                let target_abs_screen_y = inner_board_area.y + screen_cell_y;
+
+                // Ensure the target cell is within bounds
+                if screen_cell_x < inner_board_area.width && screen_cell_y < inner_board_area.height
+                {
+                    let cell = frame
+                        .buffer_mut()
+                        .get_mut(target_abs_screen_x, target_abs_screen_y);
+
+                    // Check if this pixel is already correct on the board
+                    let is_already_correct = is_pixel_already_correct_ui(
+                        &app.board,
+                        art_abs_x,
+                        art_abs_y,
+                        art_pixel.color_id,
+                    );
+
+                    // Determine pixel state: placed, current, or pending
+                    let is_placed = pixel_index < queue_item.pixels_placed;
+                    let is_current = pixel_index == queue_item.pixels_placed
+                        && queue_item.status == crate::app_state::QueueStatus::InProgress;
+                    let is_pending = pixel_index >= queue_item.pixels_placed
+                        && queue_item.status == crate::app_state::QueueStatus::Pending;
+
+                    // Get the target color for this pixel
+                    let target_color = get_ratatui_color(app, art_pixel.color_id, Color::White);
+
+                    if is_placed || is_already_correct {
+                        // Show pixels that are placed or already correct in their target color
+                        cell.set_char('▀');
+                        if (art_abs_y - app.board_viewport_y as i32) % 2 == 0 {
+                            cell.set_fg(target_color);
+                        } else {
+                            cell.set_bg(target_color);
+                        }
+                    } else if is_current {
+                        // Show current pixel being processed with bright white
+                        cell.set_char('▀');
+                        if (art_abs_y - app.board_viewport_y as i32) % 2 == 0 {
+                            cell.set_fg(Color::White);
+                        } else {
+                            cell.set_bg(Color::White);
+                        }
+                    } else if is_pending && !is_already_correct {
+                        // Show pending pixels that need to be changed with blinking effect
+                        // Blink between current board color and target color
+                        if app.queue_blink_state {
+                            // Show target color when blinking on
+                            cell.set_char('▀');
+                            if (art_abs_y - app.board_viewport_y as i32) % 2 == 0 {
+                                cell.set_fg(target_color);
+                            } else {
+                                cell.set_bg(target_color);
+                            }
+                        } else {
+                            // Show current board color when blinking off
+                            let current_board_color = get_current_board_color_ui(
+                                &app.board,
+                                &app.colors,
+                                art_abs_x,
+                                art_abs_y,
+                            );
+
+                            cell.set_char('▀');
+                            if (art_abs_y - app.board_viewport_y as i32) % 2 == 0 {
+                                cell.set_fg(current_board_color);
+                            } else {
+                                cell.set_bg(current_board_color);
+                            }
+                        }
+                    }
+                    // If pixel is pending but already correct, we don't show any overlay
+                }
+            }
+        }
+    }
+}
+
+fn render_status_area(app: &App, frame: &mut Frame, area: Rect) {
+    // Build multi-line status text
+    let mut status_lines = Vec::new();
+
+    // Add cooldown status if available
+    if !app.cooldown_status.is_empty() {
+        status_lines.push(format!("🕐 {}", app.cooldown_status));
+    }
+
+    // Add recent status messages (newest first, limit to 3 for space)
+    for (message, _timestamp) in app.status_messages.iter().rev().take(3) {
+        status_lines.push(format!("• {}", message));
+    }
+
+    // If no messages, show the main status
+    if status_lines.is_empty() || app.status_messages.is_empty() {
+        status_lines.push(app.status_message.clone());
+    }
+
+    let status_text = status_lines.join("\n");
+    let status_widget = Paragraph::new(status_text)
+        .wrap(Wrap { trim: true })
+        .block(Block::default().borders(Borders::ALL).title("Status"));
+    frame.render_widget(status_widget, area);
+}
