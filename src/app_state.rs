@@ -82,8 +82,10 @@ pub struct App {
     pub art_editor_color_palette_index: usize, // Index in the colors array for palette navigation
     pub art_editor_canvas_width: u16,          // Width of the art editor canvas
     pub art_editor_canvas_height: u16,         // Height of the art editor canvas
-    pub art_editor_viewport_x: i32,            // X offset of the art editor viewport
-    pub art_editor_viewport_y: i32,            // Y offset of the art editor viewport
+    #[allow(dead_code)]
+    pub art_editor_viewport_x: i32, // X offset of the art editor viewport - for future scrolling
+    #[allow(dead_code)]
+    pub art_editor_viewport_y: i32, // Y offset of the art editor viewport - for future scrolling
 
     // Pixel Art Selection State
     pub available_pixel_arts: Vec<PixelArt>, // List of available pixel arts (saved + default)
@@ -103,7 +105,8 @@ pub enum BoardFetchResult {
     Error(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Some variants are for future features
 pub enum PlacementUpdate {
     Progress {
         art_name: String,
@@ -130,7 +133,8 @@ pub enum PlacementUpdate {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Some variants are for future features
 pub enum QueueUpdate {
     ItemStarted {
         item_index: usize,

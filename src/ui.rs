@@ -1290,7 +1290,7 @@ fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
 
 /// Check if a pixel at the given position already has the correct color (UI helper)
 fn is_pixel_already_correct_ui(
-    board: &Vec<Vec<Option<crate::api_client::PixelNetwork>>>,
+    board: &[Vec<Option<crate::api_client::PixelNetwork>>],
     x: i32,
     y: i32,
     expected_color_id: i32,
@@ -1304,14 +1304,9 @@ fn is_pixel_already_correct_ui(
         return false;
     }
 
-    // Check if the pixel exists and has the correct color
-    if let Some(current_pixel) = board.get(x_idx).and_then(|row| row.get(y_idx)) {
-        if let Some(pixel) = current_pixel {
-            pixel.c == expected_color_id
-        } else {
-            // No pixel exists, so it's not the correct color
-            false
-        }
+    // Check if the pixel exists and has the correct color - collapsed if-let pattern
+    if let Some(Some(pixel)) = board.get(x_idx).and_then(|row| row.get(y_idx)) {
+        pixel.c == expected_color_id
     } else {
         // No pixel exists, so it's not the correct color
         false
@@ -1320,8 +1315,8 @@ fn is_pixel_already_correct_ui(
 
 /// Get the current color of a pixel on the board (UI helper)
 fn get_current_board_color_ui(
-    board: &Vec<Vec<Option<crate::api_client::PixelNetwork>>>,
-    colors: &Vec<crate::api_client::ColorInfo>,
+    board: &[Vec<Option<crate::api_client::PixelNetwork>>],
+    colors: &[crate::api_client::ColorInfo],
     x: i32,
     y: i32,
 ) -> Color {
@@ -1334,18 +1329,13 @@ fn get_current_board_color_ui(
         return Color::DarkGray; // Out of bounds
     }
 
-    // Get the current pixel color
-    if let Some(current_pixel) = board.get(x_idx).and_then(|row| row.get(y_idx)) {
-        if let Some(pixel) = current_pixel {
-            // Find the color info for this pixel's color_id
-            if let Some(color_info) = colors.iter().find(|c| c.id == pixel.c) {
-                Color::Rgb(color_info.red, color_info.green, color_info.blue)
-            } else {
-                Color::Gray // Color ID not found in palette
-            }
+    // Get the current pixel color - collapsed if-let pattern
+    if let Some(Some(pixel)) = board.get(x_idx).and_then(|row| row.get(y_idx)) {
+        // Find the color info for this pixel's color_id
+        if let Some(color_info) = colors.iter().find(|c| c.id == pixel.c) {
+            Color::Rgb(color_info.red, color_info.green, color_info.blue)
         } else {
-            // No pixel exists - empty/default
-            Color::Black
+            Color::Gray // Color ID not found in palette
         }
     } else {
         // No pixel exists - empty/default

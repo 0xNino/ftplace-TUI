@@ -2,21 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct TokenData {
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,
     pub base_url: Option<String>,
-}
-
-impl Default for TokenData {
-    fn default() -> Self {
-        Self {
-            access_token: None,
-            refresh_token: None,
-            base_url: None,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -78,6 +68,7 @@ impl TokenStorage {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn get_file_path(&self) -> &PathBuf {
         &self.file_path
     }

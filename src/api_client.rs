@@ -18,9 +18,11 @@ pub struct ColorInfo {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct PixelNetwork {
-    pub c: i32,    // color_id
-    pub u: String, // username
-    pub t: i64,    // set_time (timestamp)
+    pub c: i32, // color_id
+    #[allow(dead_code)]
+    pub u: String, // username - could be useful for future features showing who placed pixels
+    #[allow(dead_code)]
+    pub t: i64, // set_time (timestamp) - could be useful for pixel history/timeline features
 }
 
 #[derive(Deserialize, Debug)]
@@ -28,9 +30,12 @@ pub struct BoardGetResponse {
     pub colors: Vec<ColorInfo>,
     pub board: Vec<Vec<Option<PixelNetwork>>>,
     // Optional fields for admin view (min_time, max_time, type)
-    pub r#type: Option<String>, // "board" or "image"
-    pub min_time: Option<i64>,
-    pub max_time: Option<i64>,
+    #[allow(dead_code)]
+    pub r#type: Option<String>, // "board" or "image" - for future admin features
+    #[allow(dead_code)]
+    pub min_time: Option<i64>, // for future admin/filtering features
+    #[allow(dead_code)]
+    pub max_time: Option<i64>, // for future admin/filtering features
 }
 
 #[derive(Deserialize, Debug)]
@@ -67,21 +72,30 @@ pub struct ProfileGetResponse {
 
 #[derive(Deserialize, Debug)]
 pub struct PixelUpdate {
-    pub c: i32,
-    pub u: String,
-    pub t: i64,
-    pub x: i32,
-    pub y: i32,
-    pub p: Option<String>, // campus, present in the error log
-    pub f: Option<String>, // country flag, present in the error log
+    #[allow(dead_code)]
+    pub c: i32, // could be useful for placement confirmation display
+    #[allow(dead_code)]
+    pub u: String, // could be useful for showing who placed the pixel
+    #[allow(dead_code)]
+    pub t: i64, // could be useful for placement timestamp display
+    #[allow(dead_code)]
+    pub x: i32, // could be useful for placement confirmation
+    #[allow(dead_code)]
+    pub y: i32, // could be useful for placement confirmation
+    #[allow(dead_code)]
+    pub p: Option<String>, // campus - could be useful for campus-based features
+    #[allow(dead_code)]
+    pub f: Option<String>, // country flag - could be useful for location-based features
 }
 
 #[derive(Deserialize, Debug)]
 pub struct PixelSetResponse {
+    #[allow(dead_code)]
     pub update: PixelUpdate,
-    pub timers: Vec<i64>, // This top-level one is fine and present
+    #[allow(dead_code)]
+    pub timers: Vec<i64>,
     #[serde(rename = "userInfos")]
-    pub user_infos: UserInfos, // This UserInfos is now more flexible
+    pub user_infos: UserInfos,
 }
 
 // For error responses like 425 (Too Early) or 420 (Enhance Your Hype)
@@ -94,14 +108,17 @@ pub struct ApiErrorResponse {
 
 #[derive(Debug)]
 pub enum ApiError {
-    Network(reqwest::Error),
-    ApiErrorResponse {
+    #[allow(dead_code)]
+    Network(reqwest::Error), // Used for Debug printing and error propagation
+    ErrorResponse {
         status: reqwest::StatusCode,
         error_response: ApiErrorResponse,
     },
-    UnexpectedResponse(String),
-    Unauthorized,              // For 401/403 where we don't get an ApiErrorResponse
-    FileLogError(String),      // For errors during logging to file
+    #[allow(dead_code)]
+    UnexpectedResponse(String), // Used for Debug printing with error details
+    Unauthorized, // For 401/403 where we don't get an ApiErrorResponse
+    #[allow(dead_code)]
+    FileLogError(String), // Used for Debug printing and file operation errors
     TokenRefreshedPleaseRetry, // New variant for 426
 }
 
@@ -155,6 +172,7 @@ impl ApiClient {
         self.refresh_token.clone()
     }
 
+    #[allow(dead_code)]
     pub fn get_base_url_preview(&self) -> String {
         // Return a portion of the base_url or the full thing if short
         let len = self.base_url.len();
@@ -310,7 +328,7 @@ impl ApiClient {
         } else {
             // Try to parse the collected text as our specific ApiErrorResponse struct for known API errors
             match serde_json::from_str::<ApiErrorResponse>(&response_text) {
-                Ok(error_body) => Err(ApiError::ApiErrorResponse {
+                Ok(error_body) => Err(ApiError::ErrorResponse {
                     status,
                     error_response: error_body,
                 }),

@@ -1181,6 +1181,7 @@ impl App {
         self.board_load_start = None;
     }
 
+    #[allow(dead_code)]
     async fn fetch_profile_data(&mut self) {
         if self.api_client.get_auth_cookie_preview().is_none() {
             self.status_message =
@@ -1221,6 +1222,7 @@ impl App {
     }
 
     /// Trigger non-blocking art placement if one isn't already in progress
+    #[allow(dead_code)]
     fn trigger_art_placement(&mut self) {
         if self.placement_in_progress {
             self.status_message =
@@ -1326,9 +1328,9 @@ impl App {
                     Err(e) => {
                         // Send error update
                         let error_msg = match e {
-                            crate::api_client::ApiError::ApiErrorResponse {
+                            crate::api_client::ApiError::ErrorResponse {
+                                status: _,
                                 error_response,
-                                ..
                             } => error_response.message,
                             _ => format!("{:?}", e),
                         };
@@ -1355,6 +1357,7 @@ impl App {
         });
     }
 
+    #[allow(dead_code)]
     async fn place_loaded_art(&mut self) {
         if self.loaded_art.is_none() {
             self.status_message = "No art loaded to place.".to_string();
@@ -1456,7 +1459,7 @@ impl App {
                     // Check if it's unauthorized first for token clearing
                     match &e {
                         ApiError::Unauthorized
-                        | ApiError::ApiErrorResponse {
+                        | ApiError::ErrorResponse {
                             status: reqwest::StatusCode::UNAUTHORIZED,
                             ..
                         } => {
@@ -1475,7 +1478,7 @@ impl App {
                         .await;
 
                     // For rate limiting errors, don't halt placement - let enhanced display handle it
-                    if let ApiError::ApiErrorResponse { status, .. } = &e {
+                    if let ApiError::ErrorResponse { status, .. } = &e {
                         if status == &reqwest::StatusCode::TOO_MANY_REQUESTS
                             || status.as_u16() == 425
                             || status.as_u16() == 420
@@ -1553,6 +1556,7 @@ impl App {
     }
 
     /// Check if a pixel at the given position already has the correct color
+    #[allow(dead_code)]
     fn is_pixel_already_correct(&self, x: i32, y: i32, expected_color_id: i32) -> bool {
         // Convert to usize for array indexing
         let x_idx = x as usize;
@@ -1645,12 +1649,13 @@ impl App {
     }
 
     /// Check if tokens were refreshed and save them if needed
+    #[allow(dead_code)]
     async fn check_and_save_refreshed_tokens(&mut self) {
         // This will be called after API operations that might refresh tokens
         self.save_tokens();
     }
 
-    /// Enhanced error message formatting that utilizes timers and interval from ApiErrorResponse
+    /// Enhanced error message formatting that utilizes timers and interval from ErrorResponse
     fn format_enhanced_error_message(
         &self,
         base_message: &str,
@@ -1697,14 +1702,14 @@ impl App {
         enhanced_message
     }
 
-    /// Enhanced error handling for API operations that uses the ApiErrorResponse fields
+    /// Enhanced error handling for API operations that uses the ErrorResponse fields
     async fn handle_api_error_with_enhanced_display(
         &mut self,
         base_message: &str,
         error: &crate::api_client::ApiError,
     ) {
         match error {
-            crate::api_client::ApiError::ApiErrorResponse {
+            crate::api_client::ApiError::ErrorResponse {
                 status,
                 error_response,
             } => {
@@ -2001,7 +2006,7 @@ impl App {
                             Err(e) => {
                                 // Handle different types of errors
                                 match &e {
-                                    crate::api_client::ApiError::ApiErrorResponse {
+                                    crate::api_client::ApiError::ErrorResponse {
                                         status,
                                         error_response,
                                     } => {
@@ -2180,6 +2185,7 @@ impl App {
     }
 
     /// Start processing the art queue
+    #[allow(dead_code)]
     async fn start_queue_processing(&mut self) {
         if self.art_queue.is_empty() {
             self.status_message = "Queue is empty.".to_string();
@@ -2246,6 +2252,7 @@ impl App {
     }
 
     /// Place art from queue at its stored position
+    #[allow(dead_code)]
     async fn place_art_from_queue(
         &mut self,
         art: &PixelArt,
