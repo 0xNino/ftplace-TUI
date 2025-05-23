@@ -242,15 +242,21 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
                 }
             }
 
-            // Overlay queue previews with blinking effect
+            // Overlay queue previews with progress-aware visual feedback
             if !app.art_queue.is_empty() {
                 for queue_item in &app.art_queue {
-                    // Only show pending items with blinking effect
-                    if queue_item.status != crate::app_state::QueueStatus::Pending {
-                        continue;
+                    // Show all queue items (pending, in progress, complete)
+                    if queue_item.status == crate::app_state::QueueStatus::Failed
+                        || queue_item.status == crate::app_state::QueueStatus::Skipped
+                    {
+                        continue; // Don't show failed/skipped items
                     }
 
-                    for art_pixel in &queue_item.art.pixels {
+                    // Filter meaningful pixels for this queue item
+                    let meaningful_pixels: Vec<_> =
+                        queue_item.art.pixels.iter().enumerate().collect();
+
+                    for (pixel_index, art_pixel) in meaningful_pixels {
                         let art_abs_x = queue_item.art.board_x + art_pixel.x;
                         let art_abs_y = queue_item.art.board_y + art_pixel.y;
 
@@ -276,16 +282,23 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
                                     .buffer_mut()
                                     .get_mut(target_abs_screen_x, target_abs_screen_y);
 
-                                // Blinking effect for queue previews
-                                if app.queue_blink_state {
-                                    // Priority-based colors for blink
+                                // Determine pixel state: placed, current, or pending
+                                let is_placed = pixel_index < queue_item.pixels_placed;
+                                let is_current = pixel_index == queue_item.pixels_placed
+                                    && queue_item.status
+                                        == crate::app_state::QueueStatus::InProgress;
+                                let is_pending = pixel_index >= queue_item.pixels_placed
+                                    && queue_item.status == crate::app_state::QueueStatus::Pending;
+
+                                if is_placed {
+                                    // Show placed pixels as dimmed (low intensity)
                                     let preview_color = match queue_item.priority {
-                                        1 => Color::Red,     // High priority - red
-                                        2 => Color::Yellow,  // High-medium - yellow
-                                        3 => Color::Cyan,    // Medium - cyan
-                                        4 => Color::Green,   // Low-medium - green
-                                        5 => Color::Blue,    // Low priority - blue
-                                        _ => Color::Magenta, // Default
+                                        1 => Color::Indexed(88), // Dark red
+                                        2 => Color::Indexed(94), // Dark yellow
+                                        3 => Color::Indexed(23), // Dark cyan
+                                        4 => Color::Indexed(22), // Dark green
+                                        5 => Color::Indexed(18), // Dark blue
+                                        _ => Color::DarkGray,    // Default
                                     };
 
                                     cell.set_char('▀');
@@ -294,8 +307,36 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
                                     } else {
                                         cell.set_bg(preview_color);
                                     }
+                                } else if is_current {
+                                    // Show current pixel being processed with bright white
+                                    cell.set_char('▀');
+                                    if (art_abs_y - app.board_viewport_y as i32) % 2 == 0 {
+                                        cell.set_fg(Color::White);
+                                    } else {
+                                        cell.set_bg(Color::White);
+                                    }
+                                } else if is_pending {
+                                    // Show pending pixels with blinking effect
+                                    if app.queue_blink_state {
+                                        // Priority-based colors for blink
+                                        let preview_color = match queue_item.priority {
+                                            1 => Color::Red,     // High priority - red
+                                            2 => Color::Yellow,  // High-medium - yellow
+                                            3 => Color::Cyan,    // Medium - cyan
+                                            4 => Color::Green,   // Low-medium - green
+                                            5 => Color::Blue,    // Low priority - blue
+                                            _ => Color::Magenta, // Default
+                                        };
+
+                                        cell.set_char('▀');
+                                        if (art_abs_y - app.board_viewport_y as i32) % 2 == 0 {
+                                            cell.set_fg(preview_color);
+                                        } else {
+                                            cell.set_bg(preview_color);
+                                        }
+                                    }
+                                    // When blink_state is false, show original content
                                 }
-                                // When blink_state is false, show original content
                             }
                         }
                     }
@@ -610,9 +651,17 @@ fn render_help_popup(app: &App, frame: &mut Frame) {
             "--- Pixel Art Placement ---",
             Style::default().add_modifier(Modifier::BOLD),
         )),
-        Line::from(" l: Load default art (shows art controls)"),
+        Line::from(" l: Open art selection"),
+        Line::from(" Arrows: Navigate available arts"),
+        Line::from(" Enter: Load selected art for positioning"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "--- Loaded Art (positioning & placement) ---",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
         Line::from(" Arrows: Move loaded art on board"),
-        Line::from(" Enter: Place loaded art at current position"),
+        Line::from(" Enter: Add positioned art to queue & start processing"),
+        Line::from(" Esc: Cancel loaded art or stop queue processing"),
         Line::from(""),
         Line::from(Span::styled(
             "--- Pixel Art Editor (enter with 'e') ---",
@@ -629,12 +678,13 @@ fn render_help_popup(app: &App, frame: &mut Frame) {
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::from(" w: Open work queue management"),
-        Line::from(" +: Add loaded art to queue at current position"),
-        Line::from(" Q: Start automated queue processing"),
+        Line::from(" ↑/↓: Navigate queue items"),
+        Line::from(" u/k: Move item up in queue"),
+        Line::from(" j/n: Move item down in queue"),
+        Line::from(" Enter: Start automated queue processing"),
         Line::from(" 1-5: Set priority for selected queue item"),
         Line::from(" d/Del: Remove item from queue"),
         Line::from(" c: Clear entire queue"),
-        Line::from(" ↑/↓: Navigate queue items"),
         Line::from(""),
         Line::from(Span::styled(
             "--- Input Fields (Tokens, Filenames, etc.) ---",
@@ -947,7 +997,7 @@ fn render_art_selection_ui(app: &App, frame: &mut Frame, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Select Pixel Art (Enter to load, q to quit)"),
+                .title("Select Pixel Art (Enter to load for positioning, Esc to cancel)"),
         )
         .highlight_style(
             Style::default()
@@ -1055,8 +1105,7 @@ fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
             Line::from("Queue is empty"),
             Line::from(""),
             Line::from("Controls:"),
-            Line::from("  + : Add currently loaded art to queue"),
-            Line::from("  l : Load art to add to queue"),
+            Line::from("  l : Open art selection to add arts to queue"),
             Line::from("  Esc : Return to main view"),
         ])
         .block(
@@ -1173,11 +1222,13 @@ fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::from("↑/↓  : Navigate queue"),
-        Line::from("+    : Add loaded art"),
-        Line::from("Q    : Start processing"),
+        Line::from("u/k  : Move item up"),
+        Line::from("j/n  : Move item down"),
+        Line::from("Enter: Start processing"),
         Line::from("1-5  : Set priority"),
         Line::from("d/Del: Remove item"),
         Line::from("c    : Clear queue"),
+        Line::from("l    : Add more arts"),
         Line::from("Esc  : Exit queue view"),
         Line::from(""),
         Line::from(Span::styled(

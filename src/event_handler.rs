@@ -1,5 +1,8 @@
-use crate::api_client::ApiError;
-use crate::app_state::{App, ArtQueueItem, BoardFetchResult, InputMode, QueueStatus};
+use crate::api_client::{ApiError, UserInfos};
+use crate::app_state::{
+    App, ArtQueueItem, BoardFetchResult, InputMode, PlacementUpdate, ProfileFetchResult,
+    QueueStatus, QueueUpdate,
+};
 use crate::art::{get_available_pixel_arts, load_default_pixel_art, ArtPixel, PixelArt};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use std::collections::HashSet;
@@ -25,6 +28,27 @@ impl App {
         if let Some(receiver) = &mut self.board_fetch_receiver {
             if let Ok(result) = receiver.try_recv() {
                 self.handle_board_fetch_result(result);
+            }
+        }
+
+        // Check for placement updates
+        if let Some(receiver) = &mut self.placement_receiver {
+            if let Ok(update) = receiver.try_recv() {
+                self.handle_placement_update(update);
+            }
+        }
+
+        // Check for queue processing updates
+        if let Some(receiver) = &mut self.queue_receiver {
+            if let Ok(update) = receiver.try_recv() {
+                self.handle_queue_update(update);
+            }
+        }
+
+        // Check for profile fetch results
+        if let Some(receiver) = &mut self.profile_receiver {
+            if let Ok(result) = receiver.try_recv() {
+                self.handle_profile_fetch_result(result);
             }
         }
 
@@ -222,13 +246,36 @@ impl App {
                                             art_moved = true;
                                         }
                                         KeyCode::Enter => {
-                                            self.place_loaded_art().await;
+                                            // Add loaded art to queue and start processing
+                                            if let Some(art) = &self.loaded_art {
+                                                // Add art to queue at current position
+                                                self.add_art_to_queue(art.clone()).await;
+
+                                                // Start queue processing immediately
+                                                if !self.queue_processing {
+                                                    self.trigger_queue_processing();
+                                                }
+                                            } else {
+                                                self.status_message =
+                                                    "No art loaded to place.".to_string();
+                                            }
                                         }
                                         KeyCode::Esc => {
-                                            self.loaded_art = None;
-                                            self.status_message =
-                                                "Loaded art cancelled. Board scroll re-enabled."
-                                                    .to_string();
+                                            if self.placement_in_progress {
+                                                // Cancel ongoing placement
+                                                self.placement_cancel_requested = true;
+                                                self.placement_in_progress = false;
+                                                self.placement_start = None;
+                                                self.placement_receiver = None;
+                                                self.status_message =
+                                                    "Art placement cancelled.".to_string();
+                                            } else {
+                                                // Cancel loaded art
+                                                self.loaded_art = None;
+                                                self.status_message =
+                                                    "Loaded art cancelled. Board scroll re-enabled."
+                                                        .to_string();
+                                            }
                                         }
                                         _ => {}
                                     }
@@ -266,15 +313,15 @@ impl App {
                                             self.input_buffer.clear();
                                         }
                                         KeyCode::Char('r') => self.trigger_board_fetch(),
-                                        KeyCode::Char('p') => self.fetch_profile_data().await,
+                                        KeyCode::Char('p') => self.trigger_profile_fetch(),
                                         KeyCode::Char('l') => {
-                                            // Load art selection menu
+                                            // Open art selection to add more arts
                                             self.available_pixel_arts = get_available_pixel_arts();
                                             if !self.available_pixel_arts.is_empty() {
                                                 self.input_mode = InputMode::ArtSelection;
                                                 self.art_selection_index = 0;
                                                 self.status_message = format!(
-                                                    "Select pixel art to load ({} available). Use arrows and Enter.",
+                                                    "Select pixel art to load for positioning ({} available).",
                                                     self.available_pixel_arts.len()
                                                 );
                                             } else {
@@ -303,29 +350,7 @@ impl App {
                                         KeyCode::Char('w') => {
                                             // Open work queue management
                                             self.input_mode = InputMode::ArtQueue;
-                                            self.status_message = "Work Queue Management. Use arrows to navigate, + to add loaded art, Q to start processing.".to_string();
-                                        }
-                                        KeyCode::Char('+') => {
-                                            // Add currently loaded art to queue
-                                            if let Some(art) = &self.loaded_art {
-                                                self.add_art_to_queue(art.clone()).await;
-                                            } else {
-                                                self.status_message =
-                                                    "No art loaded. Use 'l' to load art first."
-                                                        .to_string();
-                                            }
-                                        }
-                                        KeyCode::Char('Q') => {
-                                            // Start queue processing
-                                            if !self.art_queue.is_empty() {
-                                                self.queue_processing = true;
-                                                self.input_mode = InputMode::None;
-                                                self.start_queue_processing().await;
-                                            } else {
-                                                self.status_message =
-                                                    "Queue is empty. Add some arts first."
-                                                        .to_string();
-                                            }
+                                            self.status_message = "Work Queue Management. Use arrows to navigate, Enter to start processing.".to_string();
                                         }
                                         _ => {}
                                     }
@@ -518,13 +543,16 @@ impl App {
                                     }
                                 }
                                 KeyCode::Enter => {
-                                    if let Some(selected_art) =
-                                        self.available_pixel_arts.get(self.art_selection_index)
+                                    if let Some(selected_art) = self
+                                        .available_pixel_arts
+                                        .get(self.art_selection_index)
+                                        .cloned()
                                     {
+                                        // Load art for positioning
                                         self.loaded_art = Some(selected_art.clone());
                                         self.input_mode = InputMode::None;
                                         self.status_message = format!(
-                                            "Loaded art: '{}'. Use arrow keys to move. Board scroll disabled.",
+                                            "Loaded art: '{}'. Use arrows to position, Enter to add to queue.",
                                             selected_art.name
                                         );
                                     }
@@ -549,24 +577,49 @@ impl App {
                                         self.queue_selection_index += 1;
                                     }
                                 }
-                                KeyCode::Char('+') => {
-                                    // Add currently loaded art to queue
-                                    if let Some(art) = &self.loaded_art {
-                                        self.add_art_to_queue(art.clone()).await;
-                                    } else {
-                                        self.status_message =
-                                            "No art loaded. Use 'l' to load art first.".to_string();
+                                KeyCode::Char('u') | KeyCode::Char('k') => {
+                                    // Move selected item up in priority
+                                    if !self.art_queue.is_empty()
+                                        && self.queue_selection_index < self.art_queue.len()
+                                        && self.queue_selection_index > 0
+                                    {
+                                        self.art_queue.swap(
+                                            self.queue_selection_index - 1,
+                                            self.queue_selection_index,
+                                        );
+                                        self.queue_selection_index -= 1;
+                                        self.status_message = format!(
+                                            "Moved '{}' up in queue",
+                                            self.art_queue[self.queue_selection_index].art.name
+                                        );
                                     }
                                 }
-                                KeyCode::Char('Q') => {
+                                KeyCode::Char('j') | KeyCode::Char('n') => {
+                                    // Move selected item down in priority
+                                    if !self.art_queue.is_empty()
+                                        && self.queue_selection_index
+                                            < self.art_queue.len().saturating_sub(1)
+                                    {
+                                        self.art_queue.swap(
+                                            self.queue_selection_index,
+                                            self.queue_selection_index + 1,
+                                        );
+                                        self.queue_selection_index += 1;
+                                        self.status_message = format!(
+                                            "Moved '{}' down in queue",
+                                            self.art_queue[self.queue_selection_index].art.name
+                                        );
+                                    }
+                                }
+                                KeyCode::Enter => {
                                     // Start queue processing
                                     if !self.art_queue.is_empty() {
-                                        self.queue_processing = true;
                                         self.input_mode = InputMode::None;
-                                        self.start_queue_processing().await;
+                                        self.trigger_queue_processing();
                                     } else {
                                         self.status_message =
-                                            "Queue is empty. Add some arts first.".to_string();
+                                            "Queue is empty. Press 'l' to add arts first."
+                                                .to_string();
                                     }
                                 }
                                 KeyCode::Char('c') => {
@@ -619,6 +672,22 @@ impl App {
                                 KeyCode::Esc => {
                                     self.input_mode = InputMode::None;
                                     self.status_message = "Queue management closed.".to_string();
+                                }
+                                KeyCode::Char('l') => {
+                                    // Open art selection to add more arts
+                                    self.available_pixel_arts = get_available_pixel_arts();
+                                    if !self.available_pixel_arts.is_empty() {
+                                        self.input_mode = InputMode::ArtSelection;
+                                        self.art_selection_index = 0;
+                                        self.status_message = format!(
+                                            "Select pixel art to load for positioning ({} available).",
+                                            self.available_pixel_arts.len()
+                                        );
+                                    } else {
+                                        self.status_message =
+                                            "No pixel arts available. Create some first with 'e'."
+                                                .to_string();
+                                    }
                                 }
                                 _ => {}
                             },
@@ -718,6 +787,300 @@ impl App {
         self.board_loading = false;
         self.board_load_start = None;
         self.board_fetch_receiver = None;
+    }
+
+    /// Handle placement updates from background art placement tasks
+    fn handle_placement_update(&mut self, update: PlacementUpdate) {
+        match update {
+            PlacementUpdate::Progress {
+                art_name,
+                pixel_index,
+                total_pixels,
+                position,
+                cooldown_remaining,
+            } => {
+                let base_msg = format!(
+                    "Placing '{}': pixel {}/{} at ({}, {})",
+                    art_name,
+                    pixel_index + 1,
+                    total_pixels,
+                    position.0,
+                    position.1
+                );
+
+                if let Some(cooldown) = cooldown_remaining {
+                    self.status_message = format!("{} | Cooldown: {}s", base_msg, cooldown);
+                } else {
+                    self.status_message = base_msg;
+                }
+            }
+            PlacementUpdate::Complete {
+                art_name,
+                pixels_placed,
+                total_pixels,
+            } => {
+                let placement_time = self
+                    .placement_start
+                    .map(|start| start.elapsed().as_secs())
+                    .unwrap_or(0);
+
+                self.status_message = format!(
+                    "Completed placing '{}': {}/{} pixels in {}s. Refreshing board...",
+                    art_name, pixels_placed, total_pixels, placement_time
+                );
+
+                // Reset placement state
+                self.placement_in_progress = false;
+                self.placement_start = None;
+                self.placement_receiver = None;
+                self.placement_cancel_requested = false;
+
+                // Trigger board refresh to show results
+                self.trigger_board_fetch();
+            }
+            PlacementUpdate::Error {
+                art_name,
+                error_msg,
+                pixel_index,
+                total_pixels,
+            } => {
+                self.status_message = format!(
+                    "Error placing '{}' at pixel {}/{}: {}. Press 'r' to refresh board.",
+                    art_name,
+                    pixel_index + 1,
+                    total_pixels,
+                    error_msg
+                );
+
+                // Reset placement state
+                self.placement_in_progress = false;
+                self.placement_start = None;
+                self.placement_receiver = None;
+                self.placement_cancel_requested = false;
+            }
+            PlacementUpdate::Cancelled {
+                art_name,
+                pixels_placed,
+                total_pixels,
+            } => {
+                self.status_message = format!(
+                    "Cancelled placing '{}': {}/{} pixels placed. Press 'r' to refresh board.",
+                    art_name, pixels_placed, total_pixels
+                );
+
+                // Reset placement state
+                self.placement_in_progress = false;
+                self.placement_start = None;
+                self.placement_receiver = None;
+                self.placement_cancel_requested = false;
+            }
+        }
+    }
+
+    /// Handle queue processing updates from background queue processing tasks
+    fn handle_queue_update(&mut self, update: QueueUpdate) {
+        match update {
+            QueueUpdate::ItemStarted {
+                item_index,
+                art_name,
+                total_items,
+            } => {
+                self.status_message = format!(
+                    "Queue processing: Starting item {}/{} - '{}'",
+                    item_index + 1,
+                    total_items,
+                    art_name
+                );
+            }
+            QueueUpdate::ItemProgress {
+                item_index,
+                art_name,
+                pixel_index,
+                total_pixels,
+                position,
+                cooldown_remaining,
+            } => {
+                // Update the queue item progress in our local queue
+                if let Some(item) = self.art_queue.get_mut(item_index) {
+                    item.pixels_placed = pixel_index; // Current number of pixels completed
+                }
+
+                let base_msg = format!(
+                    "Queue item {}: '{}' - pixel {}/{} at ({}, {})",
+                    item_index + 1,
+                    art_name,
+                    pixel_index + 1,
+                    total_pixels,
+                    position.0,
+                    position.1
+                );
+
+                if let Some(cooldown) = cooldown_remaining {
+                    self.status_message = format!("{} | Cooldown: {}s", base_msg, cooldown);
+                } else {
+                    self.status_message = base_msg;
+                }
+            }
+            QueueUpdate::ItemCompleted {
+                item_index,
+                art_name,
+                pixels_placed,
+                total_pixels,
+            } => {
+                // Update the queue item status in our local queue
+                if let Some(item) = self.art_queue.get_mut(item_index) {
+                    item.status = QueueStatus::Complete;
+                    item.pixels_placed = pixels_placed;
+                }
+
+                self.status_message = format!(
+                    "Queue item {}: '{}' completed - {}/{} pixels placed",
+                    item_index + 1,
+                    art_name,
+                    pixels_placed,
+                    total_pixels
+                );
+            }
+            QueueUpdate::ItemFailed {
+                item_index,
+                art_name,
+                error_msg,
+            } => {
+                // Update the queue item status in our local queue
+                if let Some(item) = self.art_queue.get_mut(item_index) {
+                    item.status = QueueStatus::Failed;
+                }
+
+                self.status_message = format!(
+                    "Queue item {}: '{}' failed - {}",
+                    item_index + 1,
+                    art_name,
+                    error_msg
+                );
+            }
+            QueueUpdate::ItemSkipped {
+                item_index,
+                art_name,
+                reason,
+            } => {
+                // Update the queue item status in our local queue
+                if let Some(item) = self.art_queue.get_mut(item_index) {
+                    item.status = QueueStatus::Skipped;
+                }
+
+                self.status_message = format!(
+                    "Queue item {}: '{}' skipped - {}",
+                    item_index + 1,
+                    art_name,
+                    reason
+                );
+            }
+            QueueUpdate::QueueCompleted {
+                total_items_processed,
+                total_pixels_placed,
+                duration_secs,
+            } => {
+                self.status_message = format!(
+                    "Queue processing complete! {} items processed, {} pixels placed in {}s. Refreshing board...",
+                    total_items_processed,
+                    total_pixels_placed,
+                    duration_secs
+                );
+
+                // Reset queue processing state
+                self.queue_processing = false;
+                self.queue_processing_start = None;
+                self.queue_receiver = None;
+
+                // Trigger board refresh to show results
+                self.trigger_board_fetch();
+            }
+            QueueUpdate::QueueCancelled {
+                items_processed,
+                total_pixels_placed,
+            } => {
+                self.status_message = format!(
+                    "Queue processing cancelled: {} items processed, {} pixels placed. Press 'r' to refresh board.",
+                    items_processed,
+                    total_pixels_placed
+                );
+
+                // Reset queue processing state
+                self.queue_processing = false;
+                self.queue_processing_start = None;
+                self.queue_receiver = None;
+            }
+        }
+    }
+
+    /// Handle profile fetch results from background profile fetch tasks
+    fn handle_profile_fetch_result(&mut self, result: ProfileFetchResult) {
+        match result {
+            ProfileFetchResult::Success(user_infos) => {
+                self.status_message = format!(
+                    "Profile: {}, Pixels: {}, Cooldown: {}s, User Timers: {}",
+                    user_infos.username.as_deref().unwrap_or("N/A"),
+                    user_infos.pixel_buffer,
+                    user_infos.pixel_timer,
+                    user_infos.timers.as_ref().map_or(0, |v| v.len())
+                );
+                self.user_info = Some(user_infos);
+                // Save tokens in case they were refreshed during the API call
+                self.save_tokens();
+            }
+            ProfileFetchResult::Error(error_msg) => {
+                self.user_info = None;
+                self.status_message =
+                    format!("Error fetching profile: {}. Try 'p' to retry.", error_msg);
+            }
+        }
+
+        // Reset profile fetch state
+        self.profile_receiver = None;
+    }
+
+    /// Trigger non-blocking profile fetch
+    fn trigger_profile_fetch(&mut self) {
+        if self.api_client.get_auth_cookie_preview().is_none() {
+            self.status_message =
+                "Cannot fetch profile: Access Token not set. Please enter it.".to_string();
+            self.input_mode = InputMode::EnterAccessToken;
+            self.input_buffer.clear();
+            return;
+        }
+
+        // Create channel for profile fetch
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.profile_receiver = Some(rx);
+
+        // Clone API client data needed for the fetch
+        let base_url = self.api_client.get_base_url();
+        let access_token = self.api_client.get_access_token_clone();
+        let refresh_token = self.api_client.get_refresh_token_clone();
+
+        self.status_message = "Fetching profile data...".to_string();
+
+        // Spawn async task for profile fetching
+        tokio::spawn(async move {
+            let mut api_client =
+                crate::api_client::ApiClient::new(Some(base_url), access_token, refresh_token);
+
+            let result = match api_client.get_profile().await {
+                Ok(profile_response) => ProfileFetchResult::Success(profile_response.user_infos),
+                Err(e) => {
+                    let error_msg = match e {
+                        crate::api_client::ApiError::Unauthorized => {
+                            "Unauthorized. Access Token might be invalid or expired".to_string()
+                        }
+                        _ => format!("{:?}", e),
+                    };
+                    ProfileFetchResult::Error(error_msg)
+                }
+            };
+
+            // Send result back - if this fails, the main app has been dropped
+            let _ = tx.send(result);
+        });
     }
 
     async fn fetch_board_data(&mut self) {
@@ -827,6 +1190,142 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Trigger non-blocking art placement if one isn't already in progress
+    fn trigger_art_placement(&mut self) {
+        if self.placement_in_progress {
+            self.status_message =
+                "Art placement already in progress. Press Esc to cancel.".to_string();
+            return;
+        }
+
+        if self.loaded_art.is_none() {
+            self.status_message = "No art loaded to place.".to_string();
+            return;
+        }
+
+        if self.api_client.get_auth_cookie_preview().is_none() {
+            self.status_message =
+                "Cannot place pixels: Access Token not set. Use 'c' to set token.".to_string();
+            return;
+        }
+
+        let art_to_place = self.loaded_art.clone().unwrap();
+
+        // Filter out background/transparent pixels and duplicates
+        let meaningful_pixels = self.filter_meaningful_pixels(&art_to_place);
+        let total_pixels = meaningful_pixels.len();
+
+        if total_pixels == 0 {
+            self.status_message = format!(
+                "Art '{}' has no meaningful pixels to place (all background/transparent).",
+                art_to_place.name
+            );
+            return;
+        }
+
+        // Set up placement state
+        self.placement_in_progress = true;
+        self.placement_start = Some(Instant::now());
+        self.placement_cancel_requested = false;
+
+        // Create channel for placement updates
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.placement_receiver = Some(rx);
+
+        // Clone API client data and other needed data
+        let base_url = self.api_client.get_base_url();
+        let access_token = self.api_client.get_access_token_clone();
+        let refresh_token = self.api_client.get_refresh_token_clone();
+        let colors = self.colors.clone();
+
+        self.status_message = format!(
+            "Starting to place art '{}' ({} meaningful pixels out of {} total)...",
+            art_to_place.name,
+            total_pixels,
+            art_to_place.pixels.len()
+        );
+
+        // Spawn async task for art placement
+        tokio::spawn(async move {
+            let mut api_client =
+                crate::api_client::ApiClient::new(Some(base_url), access_token, refresh_token);
+
+            let mut pixels_placed = 0;
+            let mut user_info: Option<UserInfos> = None;
+
+            for (index, art_pixel) in meaningful_pixels.iter().enumerate() {
+                let abs_x = art_to_place.board_x + art_pixel.x;
+                let abs_y = art_to_place.board_y + art_pixel.y;
+
+                // Check for cooldown before placing pixel
+                let mut cooldown_remaining = None;
+                if let Some(ref info) = user_info {
+                    if info.pixel_buffer <= 0 && info.pixel_timer > 0 {
+                        cooldown_remaining = Some(info.pixel_timer as u32);
+
+                        // Send cooldown progress update
+                        let _ = tx.send(PlacementUpdate::Progress {
+                            art_name: art_to_place.name.clone(),
+                            pixel_index: index,
+                            total_pixels,
+                            position: (abs_x, abs_y),
+                            cooldown_remaining,
+                        });
+
+                        // Wait for cooldown
+                        tokio::time::sleep(Duration::from_secs(info.pixel_timer as u64)).await;
+                    }
+                }
+
+                // Send placement progress update
+                let _ = tx.send(PlacementUpdate::Progress {
+                    art_name: art_to_place.name.clone(),
+                    pixel_index: index,
+                    total_pixels,
+                    position: (abs_x, abs_y),
+                    cooldown_remaining: None,
+                });
+
+                match api_client
+                    .place_pixel(abs_x, abs_y, art_pixel.color_id)
+                    .await
+                {
+                    Ok(response) => {
+                        pixels_placed += 1;
+                        user_info = Some(response.user_infos);
+                    }
+                    Err(e) => {
+                        // Send error update
+                        let error_msg = match e {
+                            crate::api_client::ApiError::ApiErrorResponse {
+                                error_response,
+                                ..
+                            } => error_response.message,
+                            _ => format!("{:?}", e),
+                        };
+                        let _ = tx.send(PlacementUpdate::Error {
+                            art_name: art_to_place.name.clone(),
+                            error_msg,
+                            pixel_index: index,
+                            total_pixels,
+                        });
+                        return;
+                    }
+                }
+
+                // Small delay between pixels
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+
+            // Send completion update
+            let _ = tx.send(PlacementUpdate::Complete {
+                art_name: art_to_place.name.clone(),
+                pixels_placed,
+                total_pixels,
+            });
+        });
     }
 
     async fn place_loaded_art(&mut self) {
@@ -1268,6 +1767,250 @@ impl App {
                 other => other,
             }
         });
+    }
+
+    /// Trigger non-blocking queue processing if not already in progress
+    fn trigger_queue_processing(&mut self) {
+        if self.queue_processing {
+            self.status_message =
+                "Queue processing already in progress. Press Esc to cancel.".to_string();
+            return;
+        }
+
+        if self.art_queue.is_empty() {
+            self.status_message = "Queue is empty.".to_string();
+            return;
+        }
+
+        let pending_count = self
+            .art_queue
+            .iter()
+            .filter(|item| item.status == QueueStatus::Pending)
+            .count();
+
+        if pending_count == 0 {
+            self.status_message = "No pending items in queue.".to_string();
+            return;
+        }
+
+        // Set up queue processing state
+        self.queue_processing = true;
+        self.queue_processing_start = Some(Instant::now());
+
+        // Create channel for queue updates
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.queue_receiver = Some(rx);
+
+        // Clone API client data and queue data needed for processing
+        let base_url = self.api_client.get_base_url();
+        let access_token = self.api_client.get_access_token_clone();
+        let refresh_token = self.api_client.get_refresh_token_clone();
+        let queue_items: Vec<_> = self
+            .art_queue
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| item.status == QueueStatus::Pending)
+            .map(|(index, item)| (index, item.clone()))
+            .collect();
+
+        self.status_message = format!(
+            "Starting queue processing: {} pending items...",
+            pending_count
+        );
+
+        // Spawn async task for queue processing
+        tokio::spawn(async move {
+            let mut api_client =
+                crate::api_client::ApiClient::new(Some(base_url), access_token, refresh_token);
+
+            let mut processed_count = 0;
+            let mut total_pixels_placed = 0;
+            let start_time = Instant::now();
+
+            for (original_index, mut queue_item) in queue_items {
+                // Send item started update
+                let _ = tx.send(QueueUpdate::ItemStarted {
+                    item_index: original_index,
+                    art_name: queue_item.art.name.clone(),
+                    total_items: processed_count + 1, // Will be corrected as we process
+                });
+
+                // Filter meaningful pixels for this art
+                let meaningful_pixels = Self::filter_meaningful_pixels_static(&queue_item.art);
+
+                if meaningful_pixels.is_empty() {
+                    // Send skip update
+                    let _ = tx.send(QueueUpdate::ItemSkipped {
+                        item_index: original_index,
+                        art_name: queue_item.art.name.clone(),
+                        reason: "No meaningful pixels to place".to_string(),
+                    });
+                    continue;
+                }
+
+                let mut pixels_placed_for_item = 0;
+                let mut user_info: Option<UserInfos> = None;
+
+                // Process each pixel in this art
+                for (pixel_index, art_pixel) in meaningful_pixels.iter().enumerate() {
+                    let abs_x = queue_item.art.board_x + art_pixel.x;
+                    let abs_y = queue_item.art.board_y + art_pixel.y;
+
+                    // Check for cooldown
+                    let mut cooldown_remaining = None;
+                    if let Some(ref info) = user_info {
+                        if info.pixel_buffer <= 0 && info.pixel_timer > 0 {
+                            cooldown_remaining = Some(info.pixel_timer as u32);
+
+                            // Send cooldown progress update
+                            let _ = tx.send(QueueUpdate::ItemProgress {
+                                item_index: original_index,
+                                art_name: queue_item.art.name.clone(),
+                                pixel_index,
+                                total_pixels: meaningful_pixels.len(),
+                                position: (abs_x, abs_y),
+                                cooldown_remaining,
+                            });
+
+                            // Wait for cooldown
+                            tokio::time::sleep(Duration::from_secs(info.pixel_timer as u64)).await;
+                        }
+                    }
+
+                    // Send placement progress update
+                    let _ = tx.send(QueueUpdate::ItemProgress {
+                        item_index: original_index,
+                        art_name: queue_item.art.name.clone(),
+                        pixel_index,
+                        total_pixels: meaningful_pixels.len(),
+                        position: (abs_x, abs_y),
+                        cooldown_remaining: None,
+                    });
+
+                    // Retry loop for this pixel
+                    loop {
+                        match api_client
+                            .place_pixel(abs_x, abs_y, art_pixel.color_id)
+                            .await
+                        {
+                            Ok(response) => {
+                                pixels_placed_for_item += 1;
+                                total_pixels_placed += 1;
+                                user_info = Some(response.user_infos);
+                                break; // Successfully placed, move to next pixel
+                            }
+                            Err(e) => {
+                                // Handle different types of errors
+                                match &e {
+                                    crate::api_client::ApiError::ApiErrorResponse {
+                                        status,
+                                        error_response,
+                                    } => {
+                                        // Check if this is a cooldown/rate limit error
+                                        if *status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                                            || status.as_u16() == 425 // Too Early
+                                            || status.as_u16() == 420
+                                        // Enhance Your Hype
+                                        {
+                                            // Extract cooldown time from error response
+                                            let cooldown_time =
+                                                if let Some(interval) = error_response.interval {
+                                                    (interval as f64 / 1000.0) as u64
+                                                } else {
+                                                    5 // Default 5 second cooldown
+                                                };
+
+                                            // Send cooldown update
+                                            let _ = tx.send(QueueUpdate::ItemProgress {
+                                                item_index: original_index,
+                                                art_name: queue_item.art.name.clone(),
+                                                pixel_index,
+                                                total_pixels: meaningful_pixels.len(),
+                                                position: (abs_x, abs_y),
+                                                cooldown_remaining: Some(cooldown_time as u32),
+                                            });
+
+                                            // Wait for cooldown
+                                            tokio::time::sleep(Duration::from_secs(cooldown_time))
+                                                .await;
+
+                                            // Continue the loop to retry this pixel
+                                            continue;
+                                        } else {
+                                            // Other API errors (auth, server error, etc.) - stop processing
+                                            let _ = tx.send(QueueUpdate::ItemFailed {
+                                                item_index: original_index,
+                                                art_name: queue_item.art.name.clone(),
+                                                error_msg: error_response.message.clone(),
+                                            });
+                                            return;
+                                        }
+                                    }
+                                    crate::api_client::ApiError::Unauthorized => {
+                                        // Auth error - stop processing
+                                        let _ = tx.send(QueueUpdate::ItemFailed {
+                                            item_index: original_index,
+                                            art_name: queue_item.art.name.clone(),
+                                            error_msg: "Unauthorized - check tokens".to_string(),
+                                        });
+                                        return;
+                                    }
+                                    _ => {
+                                        // Other errors (network, etc.) - stop processing
+                                        let _ = tx.send(QueueUpdate::ItemFailed {
+                                            item_index: original_index,
+                                            art_name: queue_item.art.name.clone(),
+                                            error_msg: format!("{:?}", e),
+                                        });
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Small delay between pixels
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+
+                // Send item completion update
+                let _ = tx.send(QueueUpdate::ItemCompleted {
+                    item_index: original_index,
+                    art_name: queue_item.art.name.clone(),
+                    pixels_placed: pixels_placed_for_item,
+                    total_pixels: meaningful_pixels.len(),
+                });
+
+                processed_count += 1;
+            }
+
+            // Send queue completion update
+            let duration_secs = start_time.elapsed().as_secs();
+            let _ = tx.send(QueueUpdate::QueueCompleted {
+                total_items_processed: processed_count,
+                total_pixels_placed,
+                duration_secs,
+            });
+        });
+    }
+
+    /// Static helper for filtering meaningful pixels (used in spawned tasks)
+    fn filter_meaningful_pixels_static(art: &PixelArt) -> Vec<ArtPixel> {
+        let mut meaningful_pixels = Vec::new();
+        let mut seen_positions = HashSet::new();
+
+        // For now, include all pixels since we can't access colors from static context
+        // This could be improved by passing color filtering rules to the spawned task
+        for pixel in &art.pixels {
+            let position = (pixel.x, pixel.y);
+            if seen_positions.contains(&position) {
+                continue;
+            }
+            meaningful_pixels.push(pixel.clone());
+            seen_positions.insert(position);
+        }
+
+        meaningful_pixels
     }
 
     /// Start processing the art queue

@@ -59,6 +59,13 @@ pub struct App {
     pub board_loading: bool,         // Flag to indicate board is being fetched in background
     pub board_load_start: Option<Instant>, // When background load started
     pub board_fetch_receiver: Option<mpsc::UnboundedReceiver<BoardFetchResult>>, // Channel for receiving board fetch results
+    pub placement_receiver: Option<mpsc::UnboundedReceiver<PlacementUpdate>>, // Channel for receiving placement updates
+    pub placement_in_progress: bool, // Flag to indicate art placement is in progress
+    pub placement_start: Option<Instant>, // When placement started
+    pub placement_cancel_requested: bool, // Flag to request cancellation
+    pub queue_receiver: Option<mpsc::UnboundedReceiver<QueueUpdate>>, // Channel for receiving queue processing updates
+    pub queue_processing_start: Option<Instant>, // When queue processing started
+    pub profile_receiver: Option<mpsc::UnboundedReceiver<ProfileFetchResult>>, // Channel for receiving profile fetch results
 
     // State for Base URL selection
     pub base_url_options: Vec<String>,
@@ -90,5 +97,80 @@ pub struct App {
 #[derive(Debug)]
 pub enum BoardFetchResult {
     Success(BoardGetResponse),
+    Error(String),
+}
+
+#[derive(Debug)]
+pub enum PlacementUpdate {
+    Progress {
+        art_name: String,
+        pixel_index: usize,
+        total_pixels: usize,
+        position: (i32, i32),
+        cooldown_remaining: Option<u32>,
+    },
+    Complete {
+        art_name: String,
+        pixels_placed: usize,
+        total_pixels: usize,
+    },
+    Error {
+        art_name: String,
+        error_msg: String,
+        pixel_index: usize,
+        total_pixels: usize,
+    },
+    Cancelled {
+        art_name: String,
+        pixels_placed: usize,
+        total_pixels: usize,
+    },
+}
+
+#[derive(Debug)]
+pub enum QueueUpdate {
+    ItemStarted {
+        item_index: usize,
+        art_name: String,
+        total_items: usize,
+    },
+    ItemProgress {
+        item_index: usize,
+        art_name: String,
+        pixel_index: usize,
+        total_pixels: usize,
+        position: (i32, i32),
+        cooldown_remaining: Option<u32>,
+    },
+    ItemCompleted {
+        item_index: usize,
+        art_name: String,
+        pixels_placed: usize,
+        total_pixels: usize,
+    },
+    ItemFailed {
+        item_index: usize,
+        art_name: String,
+        error_msg: String,
+    },
+    ItemSkipped {
+        item_index: usize,
+        art_name: String,
+        reason: String,
+    },
+    QueueCompleted {
+        total_items_processed: usize,
+        total_pixels_placed: usize,
+        duration_secs: u64,
+    },
+    QueueCancelled {
+        items_processed: usize,
+        total_pixels_placed: usize,
+    },
+}
+
+#[derive(Debug)]
+pub enum ProfileFetchResult {
+    Success(crate::api_client::UserInfos),
     Error(String),
 }
