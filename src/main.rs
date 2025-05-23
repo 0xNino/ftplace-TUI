@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::io::{self, stdout};
 
 use crossterm::{
@@ -73,7 +74,9 @@ impl App {
             token_storage,
             input_mode: initial_mode,
             input_buffer: String::new(),
-            status_message: initial_message,
+            status_message: initial_message.clone(),
+            status_messages: VecDeque::new(),
+            cooldown_status: String::new(),
             board: Vec::new(),
             colors: Vec::new(),
             user_info: None,

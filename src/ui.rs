@@ -282,6 +282,14 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
                                     .buffer_mut()
                                     .get_mut(target_abs_screen_x, target_abs_screen_y);
 
+                                // Check if this pixel is already correct on the board
+                                let is_already_correct = is_pixel_already_correct_ui(
+                                    &app.board,
+                                    art_abs_x,
+                                    art_abs_y,
+                                    art_pixel.color_id,
+                                );
+
                                 // Determine pixel state: placed, current, or pending
                                 let is_placed = pixel_index < queue_item.pixels_placed;
                                 let is_current = pixel_index == queue_item.pixels_placed
@@ -290,22 +298,17 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
                                 let is_pending = pixel_index >= queue_item.pixels_placed
                                     && queue_item.status == crate::app_state::QueueStatus::Pending;
 
-                                if is_placed {
-                                    // Show placed pixels as dimmed (low intensity)
-                                    let preview_color = match queue_item.priority {
-                                        1 => Color::Indexed(88), // Dark red
-                                        2 => Color::Indexed(94), // Dark yellow
-                                        3 => Color::Indexed(23), // Dark cyan
-                                        4 => Color::Indexed(22), // Dark green
-                                        5 => Color::Indexed(18), // Dark blue
-                                        _ => Color::DarkGray,    // Default
-                                    };
+                                // Get the target color for this pixel
+                                let target_color =
+                                    get_ratatui_color(app, art_pixel.color_id, Color::White);
 
+                                if is_placed || is_already_correct {
+                                    // Show pixels that are placed or already correct in their target color
                                     cell.set_char('▀');
                                     if (art_abs_y - app.board_viewport_y as i32) % 2 == 0 {
-                                        cell.set_fg(preview_color);
+                                        cell.set_fg(target_color);
                                     } else {
-                                        cell.set_bg(preview_color);
+                                        cell.set_bg(target_color);
                                     }
                                 } else if is_current {
                                     // Show current pixel being processed with bright white
@@ -315,28 +318,35 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
                                     } else {
                                         cell.set_bg(Color::White);
                                     }
-                                } else if is_pending {
-                                    // Show pending pixels with blinking effect
+                                } else if is_pending && !is_already_correct {
+                                    // Show pending pixels that need to be changed with blinking effect
+                                    // Blink between current board color and target color
                                     if app.queue_blink_state {
-                                        // Priority-based colors for blink
-                                        let preview_color = match queue_item.priority {
-                                            1 => Color::Red,     // High priority - red
-                                            2 => Color::Yellow,  // High-medium - yellow
-                                            3 => Color::Cyan,    // Medium - cyan
-                                            4 => Color::Green,   // Low-medium - green
-                                            5 => Color::Blue,    // Low priority - blue
-                                            _ => Color::Magenta, // Default
-                                        };
+                                        // Show target color when blinking on
+                                        cell.set_char('▀');
+                                        if (art_abs_y - app.board_viewport_y as i32) % 2 == 0 {
+                                            cell.set_fg(target_color);
+                                        } else {
+                                            cell.set_bg(target_color);
+                                        }
+                                    } else {
+                                        // Show current board color when blinking off
+                                        let current_board_color = get_current_board_color_ui(
+                                            &app.board,
+                                            &app.colors,
+                                            art_abs_x,
+                                            art_abs_y,
+                                        );
 
                                         cell.set_char('▀');
                                         if (art_abs_y - app.board_viewport_y as i32) % 2 == 0 {
-                                            cell.set_fg(preview_color);
+                                            cell.set_fg(current_board_color);
                                         } else {
-                                            cell.set_bg(preview_color);
+                                            cell.set_bg(current_board_color);
                                         }
                                     }
-                                    // When blink_state is false, show original content
                                 }
+                                // If pixel is pending but already correct, we don't show any overlay
                             }
                         }
                     }
@@ -346,10 +356,31 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
     }
 
     // --- Status Message Area (main_layout[2]) ---
-    let status_widget = Paragraph::new(app.status_message.as_str())
+    let status_area = main_layout[2];
+
+    // Build multi-line status text
+    let mut status_lines = Vec::new();
+
+    // Add cooldown status if available
+    if !app.cooldown_status.is_empty() {
+        status_lines.push(format!("🕐 {}", app.cooldown_status));
+    }
+
+    // Add recent status messages (newest first, limit to 3 for space)
+    for (message, _timestamp) in app.status_messages.iter().rev().take(3) {
+        status_lines.push(format!("• {}", message));
+    }
+
+    // If no messages, show the main status
+    if status_lines.is_empty() || app.status_messages.is_empty() {
+        status_lines.push(app.status_message.clone());
+    }
+
+    let status_text = status_lines.join("\n");
+    let status_widget = Paragraph::new(status_text)
         .wrap(Wrap { trim: true })
         .block(Block::default().borders(Borders::ALL).title("Status"));
-    frame.render_widget(status_widget, main_layout[2]);
+    frame.render_widget(status_widget, status_area);
 
     // Cursor handling is now within specific input mode rendering logic above for text input
     // or handled by ListState for selection.
@@ -528,10 +559,10 @@ fn render_color_palette(app: &App, frame: &mut Frame, area: Rect) {
             };
 
             let is_selected = app.art_editor_selected_color_id == color.id;
-            let is_highlighted = idx == app.art_editor_color_palette_index;
+            let _is_highlighted = idx == app.art_editor_color_palette_index;
 
             // Create visual representation with color block and name
-            let color_display = format!("█ {} (ID: {})", color_name, color.id);
+            let _color_display = format!("█ {} (ID: {})", color_name, color.id);
 
             let mut spans = vec![
                 Span::styled(
@@ -630,7 +661,7 @@ pub fn get_color_name(app: &App, color_id: i32) -> String {
         .unwrap_or_else(|| format!("Unknown Color {}", color_id))
 }
 
-fn render_help_popup(app: &App, frame: &mut Frame) {
+fn render_help_popup(_app: &App, frame: &mut Frame) {
     let popup_area = centered_rect(60, 50, frame.size()); // Adjust size as needed
 
     let help_text = vec![
@@ -1255,4 +1286,69 @@ fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
         .wrap(Wrap { trim: false });
 
     frame.render_widget(controls_paragraph, queue_layout[1]);
+}
+
+/// Check if a pixel at the given position already has the correct color (UI helper)
+fn is_pixel_already_correct_ui(
+    board: &Vec<Vec<Option<crate::api_client::PixelNetwork>>>,
+    x: i32,
+    y: i32,
+    expected_color_id: i32,
+) -> bool {
+    // Convert to usize for array indexing
+    let x_idx = x as usize;
+    let y_idx = y as usize;
+
+    // Check bounds
+    if x_idx >= board.len() || y_idx >= board.get(x_idx).map_or(0, |col| col.len()) {
+        return false;
+    }
+
+    // Check if the pixel exists and has the correct color
+    if let Some(current_pixel) = board.get(x_idx).and_then(|row| row.get(y_idx)) {
+        if let Some(pixel) = current_pixel {
+            pixel.c == expected_color_id
+        } else {
+            // No pixel exists, so it's not the correct color
+            false
+        }
+    } else {
+        // No pixel exists, so it's not the correct color
+        false
+    }
+}
+
+/// Get the current color of a pixel on the board (UI helper)
+fn get_current_board_color_ui(
+    board: &Vec<Vec<Option<crate::api_client::PixelNetwork>>>,
+    colors: &Vec<crate::api_client::ColorInfo>,
+    x: i32,
+    y: i32,
+) -> Color {
+    // Convert to usize for array indexing
+    let x_idx = x as usize;
+    let y_idx = y as usize;
+
+    // Check bounds
+    if x_idx >= board.len() || y_idx >= board.get(x_idx).map_or(0, |col| col.len()) {
+        return Color::DarkGray; // Out of bounds
+    }
+
+    // Get the current pixel color
+    if let Some(current_pixel) = board.get(x_idx).and_then(|row| row.get(y_idx)) {
+        if let Some(pixel) = current_pixel {
+            // Find the color info for this pixel's color_id
+            if let Some(color_info) = colors.iter().find(|c| c.id == pixel.c) {
+                Color::Rgb(color_info.red, color_info.green, color_info.blue)
+            } else {
+                Color::Gray // Color ID not found in palette
+            }
+        } else {
+            // No pixel exists - empty/default
+            Color::Black
+        }
+    } else {
+        // No pixel exists - empty/default
+        Color::Black
+    }
 }

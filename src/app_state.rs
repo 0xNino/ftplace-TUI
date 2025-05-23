@@ -1,6 +1,7 @@
 use crate::api_client::{ApiClient, BoardGetResponse, ColorInfo, PixelNetwork, UserInfos};
 use crate::art::PixelArt;
 use crate::token_storage::TokenStorage;
+use std::collections::VecDeque;
 use std::time::Instant;
 use tokio::sync::mpsc;
 
@@ -47,6 +48,8 @@ pub struct App {
     pub input_mode: InputMode,
     pub input_buffer: String, // Generic input buffer (renamed from cookie_input_buffer for clarity)
     pub status_message: String, // To display messages to the user
+    pub status_messages: VecDeque<(String, Instant)>, // History of recent status messages
+    pub cooldown_status: String, // Persistent cooldown/timer info
     pub board: Vec<Vec<Option<PixelNetwork>>>,
     pub colors: Vec<ColorInfo>,
     pub user_info: Option<UserInfos>,
@@ -137,7 +140,7 @@ pub enum QueueUpdate {
     ItemProgress {
         item_index: usize,
         art_name: String,
-        pixel_index: usize,
+        pixels_placed: usize,
         total_pixels: usize,
         position: (i32, i32),
         cooldown_remaining: Option<u32>,

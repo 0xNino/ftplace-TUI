@@ -3,7 +3,7 @@ use crate::app_state::{
     App, ArtQueueItem, BoardFetchResult, InputMode, PlacementUpdate, ProfileFetchResult,
     QueueStatus, QueueUpdate,
 };
-use crate::art::{get_available_pixel_arts, load_default_pixel_art, ArtPixel, PixelArt};
+use crate::art::{get_available_pixel_arts, ArtPixel, PixelArt};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use std::collections::HashSet;
 use std::fs::File;
@@ -23,6 +23,12 @@ impl App {
 
         // Update blink state for queue previews
         self.update_blink_state();
+
+        // Update cooldown status with current timer info
+        self.update_cooldown_status();
+
+        // Clean up old status messages
+        self.cleanup_old_status_messages();
 
         // Check for completed board fetches
         if let Some(receiver) = &mut self.board_fetch_receiver {
@@ -67,7 +73,7 @@ impl App {
         }
 
         if should_refresh_board {
-            self.status_message = "Auto-refreshing board...".to_string();
+            self.add_status_message("Auto-refreshing board...".to_string());
             self.trigger_board_fetch();
         }
 
@@ -727,6 +733,7 @@ impl App {
         let base_url = self.api_client.get_base_url();
         let access_token = self.api_client.get_access_token_clone();
         let refresh_token = self.api_client.get_refresh_token_clone();
+        let _colors = self.colors.clone();
 
         // Spawn async task for board fetching
         tokio::spawn(async move {
@@ -755,7 +762,7 @@ impl App {
                 self.board = board_response.board;
                 self.colors = board_response.colors;
 
-                self.status_message = format!(
+                self.add_status_message(format!(
                     "Board data loaded in {}ms. {} colors. Board size: {}x{}. Arrows to scroll.",
                     load_time,
                     self.colors.len(),
@@ -765,7 +772,7 @@ impl App {
                     } else {
                         self.board[0].len()
                     }
-                );
+                ));
 
                 self.last_board_refresh = Some(Instant::now());
                 if !self.initial_board_fetched {
@@ -775,10 +782,10 @@ impl App {
                 self.save_tokens();
             }
             BoardFetchResult::Error(error_msg) => {
-                self.status_message = format!(
+                self.add_status_message(format!(
                     "Error fetching board after {}ms: {}. Try 'r' to refresh.",
                     load_time, error_msg
-                );
+                ));
                 self.last_board_refresh = Some(Instant::now());
             }
         }
@@ -809,9 +816,9 @@ impl App {
                 );
 
                 if let Some(cooldown) = cooldown_remaining {
-                    self.status_message = format!("{} | Cooldown: {}s", base_msg, cooldown);
+                    self.add_status_message(format!("{} | Cooldown: {}s", base_msg, cooldown));
                 } else {
-                    self.status_message = base_msg;
+                    self.add_status_message(base_msg);
                 }
             }
             PlacementUpdate::Complete {
@@ -895,30 +902,48 @@ impl App {
             QueueUpdate::ItemProgress {
                 item_index,
                 art_name,
-                pixel_index,
+                pixels_placed,
                 total_pixels,
                 position,
                 cooldown_remaining,
             } => {
                 // Update the queue item progress in our local queue
                 if let Some(item) = self.art_queue.get_mut(item_index) {
-                    item.pixels_placed = pixel_index; // Current number of pixels completed
+                    item.pixels_placed = pixels_placed; // Now correctly using actual successful placements
                 }
 
                 let base_msg = format!(
-                    "Queue item {}: '{}' - pixel {}/{} at ({}, {})",
+                    "Queue item {}: '{}' - placed {}/{} pixels at ({}, {})",
                     item_index + 1,
                     art_name,
-                    pixel_index + 1,
+                    pixels_placed, // Show successful placements count
                     total_pixels,
                     position.0,
                     position.1
                 );
 
                 if let Some(cooldown) = cooldown_remaining {
-                    self.status_message = format!("{} | Cooldown: {}s", base_msg, cooldown);
+                    if cooldown > 120 {
+                        // Long cooldown - show in minutes
+                        let minutes = cooldown / 60;
+                        let seconds = cooldown % 60;
+                        if seconds > 0 {
+                            self.add_status_message(format!(
+                                "{} | Long cooldown: {}m {}s (checking every minute)",
+                                base_msg, minutes, seconds
+                            ));
+                        } else {
+                            self.add_status_message(format!(
+                                "{} | Long cooldown: {}m (checking every minute)",
+                                base_msg, minutes
+                            ));
+                        }
+                    } else {
+                        // Normal cooldown
+                        self.add_status_message(format!("{} | Cooldown: {}s", base_msg, cooldown));
+                    }
                 } else {
-                    self.status_message = base_msg;
+                    self.add_status_message(base_msg);
                 }
             }
             QueueUpdate::ItemCompleted {
@@ -1017,21 +1042,23 @@ impl App {
     fn handle_profile_fetch_result(&mut self, result: ProfileFetchResult) {
         match result {
             ProfileFetchResult::Success(user_infos) => {
-                self.status_message = format!(
+                self.add_status_message(format!(
                     "Profile: {}, Pixels: {}, Cooldown: {}s, User Timers: {}",
                     user_infos.username.as_deref().unwrap_or("N/A"),
                     user_infos.pixel_buffer,
                     user_infos.pixel_timer,
                     user_infos.timers.as_ref().map_or(0, |v| v.len())
-                );
+                ));
                 self.user_info = Some(user_infos);
                 // Save tokens in case they were refreshed during the API call
                 self.save_tokens();
             }
             ProfileFetchResult::Error(error_msg) => {
                 self.user_info = None;
-                self.status_message =
-                    format!("Error fetching profile: {}. Try 'p' to retry.", error_msg);
+                self.add_status_message(format!(
+                    "Error fetching profile: {}. Try 'p' to retry.",
+                    error_msg
+                ));
             }
         }
 
@@ -1057,6 +1084,7 @@ impl App {
         let base_url = self.api_client.get_base_url();
         let access_token = self.api_client.get_access_token_clone();
         let refresh_token = self.api_client.get_refresh_token_clone();
+        let _colors = self.colors.clone();
 
         self.status_message = "Fetching profile data...".to_string();
 
@@ -1238,7 +1266,7 @@ impl App {
         let base_url = self.api_client.get_base_url();
         let access_token = self.api_client.get_access_token_clone();
         let refresh_token = self.api_client.get_refresh_token_clone();
-        let colors = self.colors.clone();
+        let _colors = self.colors.clone();
 
         self.status_message = format!(
             "Starting to place art '{}' ({} meaningful pixels out of {} total)...",
@@ -1260,10 +1288,9 @@ impl App {
                 let abs_y = art_to_place.board_y + art_pixel.y;
 
                 // Check for cooldown before placing pixel
-                let mut cooldown_remaining = None;
                 if let Some(ref info) = user_info {
                     if info.pixel_buffer <= 0 && info.pixel_timer > 0 {
-                        cooldown_remaining = Some(info.pixel_timer as u32);
+                        let cooldown_remaining = Some(info.pixel_timer as u32);
 
                         // Send cooldown progress update
                         let _ = tx.send(PlacementUpdate::Progress {
@@ -1417,7 +1444,7 @@ impl App {
                     self.user_info = Some(response.user_infos);
                 }
                 Err(e) => {
-                    // Use enhanced error display that utilizes timers and interval fields
+                    // Use enhanced error display for API errors
                     let base_message = format!(
                         "Error placing pixel {}/{} at ({},{})",
                         index + 1,
@@ -1461,6 +1488,8 @@ impl App {
                     return;
                 }
             }
+
+            // Small delay between pixels
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
 
@@ -1688,8 +1717,24 @@ impl App {
                     || status.as_u16() == 420
                 {
                     if let Some(timers) = &error_response.timers {
-                        if let Some(user_info) = &mut self.user_info {
-                            user_info.timers = Some(timers.clone());
+                        if let Some(ref mut info) = self.user_info {
+                            info.timers = Some(timers.clone());
+                        } else {
+                            // Create minimal user info if we don't have it
+                            self.user_info = Some(UserInfos {
+                                timers: Some(timers.clone()),
+                                pixel_buffer: 0,
+                                pixel_timer: error_response.interval.unwrap_or(5000) as i32,
+                                id: None,
+                                username: None,
+                                soft_is_admin: None,
+                                soft_is_banned: None,
+                                num: None,
+                                min_px: None,
+                                campus_name: None,
+                                iat: None,
+                                exp: None,
+                            });
                         }
                     }
                 }
@@ -1805,6 +1850,7 @@ impl App {
         let base_url = self.api_client.get_base_url();
         let access_token = self.api_client.get_access_token_clone();
         let refresh_token = self.api_client.get_refresh_token_clone();
+        let board_state = self.board.clone(); // Clone board state for pixel checking
         let queue_items: Vec<_> = self
             .art_queue
             .iter()
@@ -1814,7 +1860,7 @@ impl App {
             .collect();
 
         self.status_message = format!(
-            "Starting queue processing: {} pending items...",
+            "Starting queue processing: {} pending items (intelligent timer-based cooldown management)...",
             pending_count
         );
 
@@ -1827,7 +1873,7 @@ impl App {
             let mut total_pixels_placed = 0;
             let start_time = Instant::now();
 
-            for (original_index, mut queue_item) in queue_items {
+            for (original_index, queue_item) in queue_items {
                 // Send item started update
                 let _ = tx.send(QueueUpdate::ItemStarted {
                     item_index: original_index,
@@ -1835,15 +1881,31 @@ impl App {
                     total_items: processed_count + 1, // Will be corrected as we process
                 });
 
-                // Filter meaningful pixels for this art
+                // Filter meaningful pixels for this art and exclude already-correct pixels
                 let meaningful_pixels = Self::filter_meaningful_pixels_static(&queue_item.art);
+                let total_meaningful_pixels = meaningful_pixels.len(); // Calculate length before move
+                let pixels_to_place: Vec<_> = meaningful_pixels
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(_, art_pixel)| {
+                        let abs_x = queue_item.art.board_x + art_pixel.x;
+                        let abs_y = queue_item.art.board_y + art_pixel.y;
+                        // Only include pixels that need to be changed
+                        !Self::is_pixel_already_correct_static(
+                            &board_state,
+                            abs_x,
+                            abs_y,
+                            art_pixel.color_id,
+                        )
+                    })
+                    .collect();
 
-                if meaningful_pixels.is_empty() {
-                    // Send skip update
+                if pixels_to_place.is_empty() {
+                    // Send skip update - all pixels already correct
                     let _ = tx.send(QueueUpdate::ItemSkipped {
                         item_index: original_index,
                         art_name: queue_item.art.name.clone(),
-                        reason: "No meaningful pixels to place".to_string(),
+                        reason: "All pixels already correct".to_string(),
                     });
                     continue;
                 }
@@ -1851,29 +1913,62 @@ impl App {
                 let mut pixels_placed_for_item = 0;
                 let mut user_info: Option<UserInfos> = None;
 
-                // Process each pixel in this art
-                for (pixel_index, art_pixel) in meaningful_pixels.iter().enumerate() {
+                // Process each pixel that needs to be placed
+                for (_original_pixel_index, art_pixel) in pixels_to_place {
                     let abs_x = queue_item.art.board_x + art_pixel.x;
                     let abs_y = queue_item.art.board_y + art_pixel.y;
 
-                    // Check for cooldown
-                    let mut cooldown_remaining = None;
+                    // ALWAYS check cooldown before attempting each pixel (critical fix!)
+                    // This ensures we respect cooldowns from previous 425 error responses
                     if let Some(ref info) = user_info {
-                        if info.pixel_buffer <= 0 && info.pixel_timer > 0 {
-                            cooldown_remaining = Some(info.pixel_timer as u32);
+                        let (should_pause, wait_time) = should_pause_queue_processing(info);
 
-                            // Send cooldown progress update
+                        if should_pause {
+                            // Long cooldown detected - send pause update and wait
+                            let _minutes = wait_time / 60;
+                            let _seconds = wait_time % 60;
+
                             let _ = tx.send(QueueUpdate::ItemProgress {
                                 item_index: original_index,
                                 art_name: queue_item.art.name.clone(),
-                                pixel_index,
-                                total_pixels: meaningful_pixels.len(),
+                                pixels_placed: pixels_placed_for_item,
+                                total_pixels: total_meaningful_pixels,
                                 position: (abs_x, abs_y),
-                                cooldown_remaining,
+                                cooldown_remaining: Some(wait_time as u32),
                             });
 
-                            // Wait for cooldown
-                            tokio::time::sleep(Duration::from_secs(info.pixel_timer as u64)).await;
+                            // For very long waits, check every minute if cooldown changed
+                            let mut remaining_wait = wait_time;
+                            while remaining_wait > 60 {
+                                tokio::time::sleep(Duration::from_secs(60)).await;
+                                remaining_wait = remaining_wait.saturating_sub(60);
+
+                                let _ = tx.send(QueueUpdate::ItemProgress {
+                                    item_index: original_index,
+                                    art_name: queue_item.art.name.clone(),
+                                    pixels_placed: pixels_placed_for_item,
+                                    total_pixels: total_meaningful_pixels,
+                                    position: (abs_x, abs_y),
+                                    cooldown_remaining: Some(remaining_wait as u32),
+                                });
+                            }
+
+                            // Wait the remaining time (less than 1 minute)
+                            if remaining_wait > 0 {
+                                tokio::time::sleep(Duration::from_secs(remaining_wait)).await;
+                            }
+                        } else if wait_time > 0 {
+                            // Short cooldown - wait normally
+                            let _ = tx.send(QueueUpdate::ItemProgress {
+                                item_index: original_index,
+                                art_name: queue_item.art.name.clone(),
+                                pixels_placed: pixels_placed_for_item,
+                                total_pixels: total_meaningful_pixels,
+                                position: (abs_x, abs_y),
+                                cooldown_remaining: Some(wait_time as u32),
+                            });
+
+                            tokio::time::sleep(Duration::from_secs(wait_time)).await;
                         }
                     }
 
@@ -1881,14 +1976,17 @@ impl App {
                     let _ = tx.send(QueueUpdate::ItemProgress {
                         item_index: original_index,
                         art_name: queue_item.art.name.clone(),
-                        pixel_index,
-                        total_pixels: meaningful_pixels.len(),
+                        pixels_placed: pixels_placed_for_item,
+                        total_pixels: total_meaningful_pixels,
                         position: (abs_x, abs_y),
                         cooldown_remaining: None,
                     });
 
-                    // Retry loop for this pixel
-                    loop {
+                    // Attempt to place the pixel (with minimal retries for cooldown errors)
+                    let mut pixel_placement_success = false;
+                    const MAX_RETRIES: u32 = 1; // Reduced retries since we wait properly now
+
+                    for retry_attempt in 0..=MAX_RETRIES {
                         match api_client
                             .place_pixel(abs_x, abs_y, art_pixel.color_id)
                             .await
@@ -1897,6 +1995,7 @@ impl App {
                                 pixels_placed_for_item += 1;
                                 total_pixels_placed += 1;
                                 user_info = Some(response.user_infos);
+                                pixel_placement_success = true;
                                 break; // Successfully placed, move to next pixel
                             }
                             Err(e) => {
@@ -1912,30 +2011,65 @@ impl App {
                                             || status.as_u16() == 420
                                         // Enhance Your Hype
                                         {
-                                            // Extract cooldown time from error response
-                                            let cooldown_time =
-                                                if let Some(interval) = error_response.interval {
-                                                    (interval as f64 / 1000.0) as u64
+                                            // Update user info with new timers from error response
+                                            if let Some(timers) = &error_response.timers {
+                                                if let Some(ref mut info) = user_info {
+                                                    info.timers = Some(timers.clone());
+                                                    // Also update pixel_timer if available
+                                                    if let Some(interval) = error_response.interval
+                                                    {
+                                                        info.pixel_timer = interval as i32;
+                                                    }
                                                 } else {
-                                                    5 // Default 5 second cooldown
-                                                };
+                                                    // Create minimal user info if we don't have it
+                                                    user_info = Some(UserInfos {
+                                                        timers: Some(timers.clone()),
+                                                        pixel_buffer: 0,
+                                                        pixel_timer: error_response
+                                                            .interval
+                                                            .unwrap_or(5000)
+                                                            as i32,
+                                                        id: None,
+                                                        username: None,
+                                                        soft_is_admin: None,
+                                                        soft_is_banned: None,
+                                                        num: None,
+                                                        min_px: None,
+                                                        campus_name: None,
+                                                        iat: None,
+                                                        exp: None,
+                                                    });
+                                                }
+                                            }
 
-                                            // Send cooldown update
-                                            let _ = tx.send(QueueUpdate::ItemProgress {
-                                                item_index: original_index,
-                                                art_name: queue_item.art.name.clone(),
-                                                pixel_index,
-                                                total_pixels: meaningful_pixels.len(),
-                                                position: (abs_x, abs_y),
-                                                cooldown_remaining: Some(cooldown_time as u32),
-                                            });
+                                            // For cooldown errors, wait immediately and only retry once
+                                            if retry_attempt < MAX_RETRIES {
+                                                if let Some(ref info) = user_info {
+                                                    let (_, wait_time) =
+                                                        should_pause_queue_processing(info);
 
-                                            // Wait for cooldown
-                                            tokio::time::sleep(Duration::from_secs(cooldown_time))
-                                                .await;
+                                                    let _ = tx.send(QueueUpdate::ItemProgress {
+                                                        item_index: original_index,
+                                                        art_name: queue_item.art.name.clone(),
+                                                        pixels_placed: pixels_placed_for_item,
+                                                        total_pixels: total_meaningful_pixels,
+                                                        position: (abs_x, abs_y),
+                                                        cooldown_remaining: Some(wait_time as u32),
+                                                    });
 
-                                            // Continue the loop to retry this pixel
-                                            continue;
+                                                    // Wait for the cooldown period
+                                                    tokio::time::sleep(Duration::from_secs(
+                                                        wait_time,
+                                                    ))
+                                                    .await;
+                                                }
+                                                // Continue to retry after waiting
+                                                continue;
+                                            } else {
+                                                // Max retries reached for this pixel - skip it and continue with next
+                                                // The cooldown will be respected when we start the next pixel
+                                                break;
+                                            }
                                         } else {
                                             // Other API errors (auth, server error, etc.) - stop processing
                                             let _ = tx.send(QueueUpdate::ItemFailed {
@@ -1969,8 +2103,10 @@ impl App {
                         }
                     }
 
-                    // Small delay between pixels
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    // Small delay between pixels (only when successful)
+                    if pixel_placement_success {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
                 }
 
                 // Send item completion update
@@ -1978,7 +2114,7 @@ impl App {
                     item_index: original_index,
                     art_name: queue_item.art.name.clone(),
                     pixels_placed: pixels_placed_for_item,
-                    total_pixels: meaningful_pixels.len(),
+                    total_pixels: total_meaningful_pixels,
                 });
 
                 processed_count += 1;
@@ -2011,6 +2147,36 @@ impl App {
         }
 
         meaningful_pixels
+    }
+
+    /// Static helper for checking if a pixel is already correct
+    fn is_pixel_already_correct_static(
+        board: &Vec<Vec<Option<crate::api_client::PixelNetwork>>>,
+        x: i32,
+        y: i32,
+        expected_color_id: i32,
+    ) -> bool {
+        // Convert to usize for array indexing
+        let x_idx = x as usize;
+        let y_idx = y as usize;
+
+        // Check bounds
+        if x_idx >= board.len() || y_idx >= board.get(x_idx).map_or(0, |col| col.len()) {
+            return false;
+        }
+
+        // Check if the pixel exists and has the correct color
+        if let Some(current_pixel) = board.get(x_idx).and_then(|row| row.get(y_idx)) {
+            if let Some(pixel) = current_pixel {
+                pixel.c == expected_color_id
+            } else {
+                // No pixel exists, so it's not the correct color
+                false
+            }
+        } else {
+            // No pixel exists, so it's not the correct color
+            false
+        }
     }
 
     /// Start processing the art queue
@@ -2141,5 +2307,128 @@ impl App {
         }
 
         Ok(pixels_placed)
+    }
+
+    /// Add a new status message to the history and update the main status
+    fn add_status_message(&mut self, message: String) {
+        // Add to history with timestamp
+        self.status_messages
+            .push_back((message.clone(), Instant::now()));
+
+        // Keep only last 5 messages
+        while self.status_messages.len() > 5 {
+            self.status_messages.pop_front();
+        }
+
+        // Update main status message
+        self.status_message = message;
+    }
+
+    /// Update the persistent cooldown status
+    fn update_cooldown_status(&mut self) {
+        if let Some(user_info) = &self.user_info {
+            if user_info.pixel_buffer > 0 {
+                self.cooldown_status =
+                    format!("Buffer: {} pixels available", user_info.pixel_buffer);
+            } else if let Some(timers) = &user_info.timers {
+                if !timers.is_empty() {
+                    let current_time_ms = chrono::Utc::now().timestamp_millis();
+                    let mut active_timers = Vec::new();
+
+                    for (i, &timer_ms) in timers.iter().enumerate() {
+                        let remaining_ms = timer_ms - current_time_ms;
+                        if remaining_ms > 0 {
+                            let remaining_secs = (remaining_ms as f64 / 1000.0).ceil() as u64;
+                            if remaining_secs > 60 {
+                                let minutes = remaining_secs / 60;
+                                let seconds = remaining_secs % 60;
+                                active_timers.push(format!("T{}:{}m{}s", i + 1, minutes, seconds));
+                            } else {
+                                active_timers.push(format!("T{}:{}s", i + 1, remaining_secs));
+                            }
+                        }
+                    }
+
+                    if active_timers.is_empty() {
+                        self.cooldown_status = "Ready to place pixels".to_string();
+                    } else {
+                        self.cooldown_status = format!("Cooldowns: {}", active_timers.join(", "));
+                    }
+                } else {
+                    self.cooldown_status = format!("Cooldown: {}s", user_info.pixel_timer / 1000);
+                }
+            } else {
+                self.cooldown_status = format!("Cooldown: {}s", user_info.pixel_timer / 1000);
+            }
+        } else {
+            self.cooldown_status = "No user info available".to_string();
+        }
+    }
+
+    /// Clean up old status messages (older than 30 seconds)
+    fn cleanup_old_status_messages(&mut self) {
+        let cutoff = Instant::now() - Duration::from_secs(30);
+        while let Some((_, timestamp)) = self.status_messages.front() {
+            if *timestamp < cutoff {
+                self.status_messages.pop_front();
+            } else {
+                break;
+            }
+        }
+    }
+}
+
+/// Calculate how long to wait before we can place a pixel based on user timers and buffer
+fn calculate_cooldown_wait_time(user_info: &UserInfos) -> u64 {
+    // If we have pixel buffer available, we can place immediately
+    if user_info.pixel_buffer > 0 {
+        return 0;
+    }
+
+    // No buffer available, check timers to see when we can place next
+    if let Some(timers) = &user_info.timers {
+        if timers.is_empty() {
+            // No active timers, use pixel_timer as fallback but be conservative
+            let fallback_time = (user_info.pixel_timer as f64 / 1000.0) as u64;
+            return fallback_time.max(5); // Minimum 5 seconds
+        }
+
+        // Find the earliest timer that will expire (most important change)
+        let current_time_ms = chrono::Utc::now().timestamp_millis();
+        let mut earliest_expiry = i64::MAX;
+
+        for &timer_ms in timers {
+            if timer_ms > current_time_ms && timer_ms < earliest_expiry {
+                earliest_expiry = timer_ms;
+            }
+        }
+
+        if earliest_expiry == i64::MAX {
+            // All timers have expired - we should be able to place now
+            return 0;
+        }
+
+        // Calculate exact wait time in seconds
+        let wait_time_ms = earliest_expiry - current_time_ms;
+        let wait_time_secs = (wait_time_ms as f64 / 1000.0).ceil() as u64;
+
+        // Return the exact time (no artificial minimums for accurate timing)
+        wait_time_secs + 1 // Just 1 second buffer for timing precision
+    } else {
+        // No timer data, fall back to pixel_timer but be conservative
+        let fallback_time = (user_info.pixel_timer as f64 / 1000.0) as u64;
+        fallback_time.max(5) // Minimum 5 seconds
+    }
+}
+
+/// Check if we should pause queue processing due to long cooldowns
+fn should_pause_queue_processing(user_info: &UserInfos) -> (bool, u64) {
+    let wait_time = calculate_cooldown_wait_time(user_info);
+
+    // Pause if we need to wait more than 2 minutes
+    if wait_time > 120 {
+        (true, wait_time)
+    } else {
+        (false, wait_time)
     }
 }
