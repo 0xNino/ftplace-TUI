@@ -14,6 +14,7 @@ pub fn render_help_popup(_app: &App, frame: &mut Frame) {
         Line::from(" q: Quit application"),
         Line::from(" ?: Toggle this help screen"),
         Line::from(" c: Configure/Re-enter Access Token"),
+        Line::from(" b: Change Base URL"),
         Line::from(" r: Refresh board data"),
         Line::from(" p: Fetch profile data"),
         Line::from(" i: Show user profile panel"),
@@ -154,6 +155,22 @@ pub fn render_profile_popup(app: &App, frame: &mut Frame) {
             Span::styled(
                 user_info.pixel_buffer.to_string(),
                 Style::default().fg(Color::Blue),
+            ),
+        ]));
+
+        let available_pixels = if let Some(timers) = &user_info.timers {
+            user_info.pixel_buffer - timers.len() as i32
+        } else {
+            user_info.pixel_buffer
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                "Available Pixels: ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                available_pixels.to_string(),
+                Style::default().fg(Color::Green),
             ),
         ]));
 

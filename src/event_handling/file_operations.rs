@@ -8,12 +8,25 @@ impl App {
     /// Save current art in editor to file
     pub async fn save_current_art_to_file(&mut self, filename: String) {
         if let Some(art) = &self.current_editing_art {
-            // Use the art's existing name, and preserve any positioning
+            // Calculate width and height from pattern data
+            let (width, height) = if art.pattern.is_empty() {
+                (0, 0)
+            } else {
+                let min_x = art.pattern.iter().map(|p| p.x).min().unwrap_or(0);
+                let max_x = art.pattern.iter().map(|p| p.x).max().unwrap_or(0);
+                let min_y = art.pattern.iter().map(|p| p.y).min().unwrap_or(0);
+                let max_y = art.pattern.iter().map(|p| p.y).max().unwrap_or(0);
+                (max_x - min_x + 1, max_y - min_y + 1)
+            };
+
+            // Use the new format with pattern, width, and height
             let art_with_name = PixelArt {
                 name: art.name.clone(),
-                pixels: art.pixels.clone(),
-                board_x: art.board_x, // Preserve position for queue automation
-                board_y: art.board_y,
+                width,
+                height,
+                pattern: art.pattern.clone(),
+                board_x: 0, // Don't save board position to file
+                board_y: 0,
             };
             match serde_json::to_string_pretty(&art_with_name) {
                 Ok(json_data) => {

@@ -83,7 +83,7 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
             let config_display_widget = Paragraph::new(display_text).block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("Current Config (c to edit AccessToken)"),
+                    .title("Current Config (b to edit Base URL, c to edit AccessToken)"),
             );
             frame.render_widget(config_display_widget, input_area_rect);
         }
@@ -244,7 +244,7 @@ fn render_loaded_art_overlay(
     inner_board_area: &Rect,
     art: &crate::art::PixelArt,
 ) {
-    for art_pixel in &art.pixels {
+    for art_pixel in &art.pattern {
         let art_abs_x = art.board_x + art_pixel.x;
         let art_abs_y = art.board_y + art_pixel.y;
 
@@ -263,7 +263,7 @@ fn render_loaded_art_overlay(
 
             // Ensure the target cell is within the drawable inner_board_area bounds
             if screen_cell_x < inner_board_area.width && screen_cell_y < inner_board_area.height {
-                let art_color = get_ratatui_color(app, art_pixel.color_id, Color::Magenta);
+                let art_color = get_ratatui_color(app, art_pixel.color, Color::Magenta);
                 let cell = frame
                     .buffer_mut()
                     .get_mut(target_abs_screen_x, target_abs_screen_y);
@@ -289,7 +289,7 @@ fn render_queue_overlay(app: &App, frame: &mut Frame, inner_board_area: &Rect) {
         }
 
         // Filter meaningful pixels for this queue item
-        let meaningful_pixels: Vec<_> = queue_item.art.pixels.iter().enumerate().collect();
+        let meaningful_pixels: Vec<_> = queue_item.art.pattern.iter().enumerate().collect();
 
         for (pixel_index, art_pixel) in meaningful_pixels {
             let art_abs_x = queue_item.art.board_x + art_pixel.x;
@@ -319,7 +319,7 @@ fn render_queue_overlay(app: &App, frame: &mut Frame, inner_board_area: &Rect) {
                         &app.board,
                         art_abs_x,
                         art_abs_y,
-                        art_pixel.color_id,
+                        art_pixel.color,
                     );
 
                     // Determine pixel state: placed, current, or pending
@@ -330,7 +330,7 @@ fn render_queue_overlay(app: &App, frame: &mut Frame, inner_board_area: &Rect) {
                         && queue_item.status == crate::app_state::QueueStatus::Pending;
 
                     // Get the target color for this pixel
-                    let target_color = get_ratatui_color(app, art_pixel.color_id, Color::White);
+                    let target_color = get_ratatui_color(app, art_pixel.color, Color::White);
 
                     if is_placed || is_already_correct {
                         // Show pixels that are placed or already correct in their target color

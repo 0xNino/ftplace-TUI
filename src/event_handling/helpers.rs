@@ -139,8 +139,12 @@ impl App {
     pub fn update_cooldown_status(&mut self) {
         if let Some(user_info) = &self.user_info {
             if user_info.pixel_buffer > 0 {
-                self.cooldown_status =
-                    format!("Buffer: {} pixels available", user_info.pixel_buffer);
+                let available_pixels = if let Some(timers) = &user_info.timers {
+                    user_info.pixel_buffer - timers.len() as i32
+                } else {
+                    user_info.pixel_buffer
+                };
+                self.cooldown_status = format!("Buffer: {} pixels available", available_pixels);
             } else if let Some(timers) = &user_info.timers {
                 if !timers.is_empty() {
                     let current_time_ms = chrono::Utc::now().timestamp_millis();

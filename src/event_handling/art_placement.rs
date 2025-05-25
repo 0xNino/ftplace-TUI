@@ -147,7 +147,7 @@ impl App {
             "Starting to place art '{}' ({} meaningful pixels out of {} total)...",
             art_to_place.name,
             total_pixels,
-            art_to_place.pixels.len()
+            art_to_place.pattern.len()
         );
 
         // Spawn async task for art placement
@@ -190,10 +190,7 @@ impl App {
                     cooldown_remaining: None,
                 });
 
-                match api_client
-                    .place_pixel(abs_x, abs_y, art_pixel.color_id)
-                    .await
-                {
+                match api_client.place_pixel(abs_x, abs_y, art_pixel.color).await {
                     Ok(response) => {
                         pixels_placed += 1;
                         user_info = Some(response.user_infos);
@@ -261,7 +258,7 @@ impl App {
             "Starting to place art '{}' ({} meaningful pixels out of {} total)...",
             art_to_place.name,
             total_pixels,
-            art_to_place.pixels.len()
+            art_to_place.pattern.len()
         );
 
         for (index, art_pixel) in meaningful_pixels.iter().enumerate() {
@@ -269,7 +266,7 @@ impl App {
             let abs_y = art_to_place.board_y + art_pixel.y;
 
             // Check if pixel is already the correct color to avoid unnecessary placement
-            if self.is_pixel_already_correct(abs_x, abs_y, art_pixel.color_id) {
+            if self.is_pixel_already_correct(abs_x, abs_y, art_pixel.color) {
                 self.status_message = format!(
                     "Pixel {}/{} at ({},{}) already correct color, skipping...",
                     index + 1,
@@ -287,7 +284,7 @@ impl App {
                 art_to_place.name,
                 abs_x,
                 abs_y,
-                art_pixel.color_id
+                art_pixel.color
             );
 
             if let Some(u_info) = &self.user_info {
@@ -304,7 +301,7 @@ impl App {
 
             match self
                 .api_client
-                .place_pixel(abs_x, abs_y, art_pixel.color_id)
+                .place_pixel(abs_x, abs_y, art_pixel.color)
                 .await
             {
                 Ok(response) => {
@@ -386,7 +383,7 @@ impl App {
         // Usually color_id 1 is white/background, but we can be smarter about this
         let background_color_ids = self.get_background_color_ids();
 
-        for pixel in &art.pixels {
+        for pixel in &art.pattern {
             // Skip if this position was already processed (remove duplicates)
             let position = (pixel.x, pixel.y);
             if seen_positions.contains(&position) {
@@ -394,7 +391,7 @@ impl App {
             }
 
             // Skip background/transparent colors
-            if background_color_ids.contains(&pixel.color_id) {
+            if background_color_ids.contains(&pixel.color) {
                 continue;
             }
 

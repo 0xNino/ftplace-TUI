@@ -338,6 +338,11 @@ impl App {
                     self.status_message = "Re-enter Access Token (current will be overwritten if new is provided, skip Refresh Token step if not needed):".to_string();
                     self.input_buffer.clear();
                 }
+                KeyCode::Char('b') => {
+                    self.input_mode = InputMode::EnterBaseUrl;
+                    self.status_message = "Select API Base URL or choose Custom:".to_string();
+                    self.base_url_selection_index = 0; // Reset selection to first option
+                }
                 KeyCode::Char('r') => self.trigger_board_fetch(),
                 KeyCode::Char('p') => self.trigger_profile_fetch(),
                 KeyCode::Char('l') => {
@@ -409,13 +414,13 @@ impl App {
             }
             KeyCode::Char(' ') => {
                 if let Some(art) = &mut self.current_editing_art {
-                    art.pixels.retain(|p| {
+                    art.pattern.retain(|p| {
                         p.x != self.art_editor_cursor_x || p.y != self.art_editor_cursor_y
                     });
-                    art.pixels.push(ArtPixel {
+                    art.pattern.push(ArtPixel {
                         x: self.art_editor_cursor_x,
                         y: self.art_editor_cursor_y,
-                        color_id: self.art_editor_selected_color_id,
+                        color: self.art_editor_selected_color_id,
                     });
                     self.status_message = format!(
                         "Drew pixel at ({}, {}) with color {}.",
@@ -511,7 +516,9 @@ impl App {
                 if !name.is_empty() {
                     self.current_editing_art = Some(PixelArt {
                         name,
-                        pixels: Vec::new(),
+                        width: 0,
+                        height: 0,
+                        pattern: Vec::new(),
                         board_x: 0,
                         board_y: 0,
                     });

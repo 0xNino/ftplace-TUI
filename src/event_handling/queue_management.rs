@@ -288,7 +288,7 @@ impl App {
                             &board_state,
                             abs_x,
                             abs_y,
-                            art_pixel.color_id,
+                            art_pixel.color,
                         )
                     })
                     .collect();
@@ -380,10 +380,7 @@ impl App {
                     const MAX_RETRIES: u32 = 1; // Reduced retries since we wait properly now
 
                     for retry_attempt in 0..=MAX_RETRIES {
-                        match api_client
-                            .place_pixel(abs_x, abs_y, art_pixel.color_id)
-                            .await
-                        {
+                        match api_client.place_pixel(abs_x, abs_y, art_pixel.color).await {
                             Ok(response) => {
                                 pixels_placed_for_item += 1;
                                 total_pixels_placed += 1;
@@ -530,7 +527,7 @@ impl App {
 
         // For now, include all pixels since we can't access colors from static context
         // This could be improved by passing color filtering rules to the spawned task
-        for pixel in &art.pixels {
+        for pixel in &art.pattern {
             let position = (pixel.x, pixel.y);
             if seen_positions.contains(&position) {
                 continue;
@@ -660,7 +657,7 @@ impl App {
             let abs_y = art.board_y + art_pixel.y;
 
             // Check if pixel is already correct
-            if self.is_pixel_already_correct(abs_x, abs_y, art_pixel.color_id) {
+            if self.is_pixel_already_correct(abs_x, abs_y, art_pixel.color) {
                 continue;
             }
 
@@ -685,7 +682,7 @@ impl App {
             // Place the pixel
             match self
                 .api_client
-                .place_pixel(abs_x, abs_y, art_pixel.color_id)
+                .place_pixel(abs_x, abs_y, art_pixel.color)
                 .await
             {
                 Ok(response) => {

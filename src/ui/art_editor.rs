@@ -52,11 +52,11 @@ pub fn render_art_editor_ui(app: &mut App, frame: &mut Frame, area: Rect) {
                     // Top pixel of the cell
                     if art_px_y_top < app.art_editor_canvas_height as i32 {
                         if let Some(pixel) = art
-                            .pixels
+                            .pattern
                             .iter()
                             .find(|p| p.x == art_px_x && p.y == art_px_y_top)
                         {
-                            top_pixel_color = get_ratatui_color(app, pixel.color_id, Color::White);
+                            top_pixel_color = get_ratatui_color(app, pixel.color, Color::White);
                         } else {
                             // No art pixel here, could draw grid dot if desired
                             // top_pixel_color remains DarkGray (or some grid color)
@@ -69,12 +69,11 @@ pub fn render_art_editor_ui(app: &mut App, frame: &mut Frame, area: Rect) {
                     // Bottom pixel of the cell
                     if art_px_y_bottom < app.art_editor_canvas_height as i32 {
                         if let Some(pixel) = art
-                            .pixels
+                            .pattern
                             .iter()
                             .find(|p| p.x == art_px_x && p.y == art_px_y_bottom)
                         {
-                            bottom_pixel_color =
-                                get_ratatui_color(app, pixel.color_id, Color::White);
+                            bottom_pixel_color = get_ratatui_color(app, pixel.color, Color::White);
                         } else {
                             // No art pixel here
                             // bottom_pixel_color remains DarkGray

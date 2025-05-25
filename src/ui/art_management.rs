@@ -35,7 +35,7 @@ pub fn render_art_selection_ui(app: &App, frame: &mut Frame, area: Rect) {
                 art.name,
                 dimensions.0,
                 dimensions.1,
-                art.pixels.len()
+                art.pattern.len()
             );
 
             if idx == app.art_selection_index {
@@ -86,7 +86,7 @@ fn render_art_preview(art: &crate::art::PixelArt, app: &App, frame: &mut Frame, 
         horizontal: 1,
     });
 
-    if art.pixels.is_empty() {
+    if art.pattern.is_empty() {
         let empty_preview = Paragraph::new("(Empty art)").style(Style::default().fg(Color::Gray));
         frame.render_widget(empty_preview, inner_area);
         return;
@@ -128,17 +128,17 @@ fn render_art_preview(art: &crate::art::PixelArt, app: &App, frame: &mut Frame, 
             let art_pixel_x = (screen_x as f32 / scale) as i32;
 
             let top_pixel_color = art
-                .pixels
+                .pattern
                 .iter()
                 .find(|p| p.x == art_pixel_x && p.y == art_pixel_y_top)
-                .map(|p| get_ratatui_color(app, p.color_id, Color::DarkGray))
+                .map(|p| get_ratatui_color(app, p.color, Color::DarkGray))
                 .unwrap_or(Color::DarkGray);
 
             let bottom_pixel_color = art
-                .pixels
+                .pattern
                 .iter()
                 .find(|p| p.x == art_pixel_x && p.y == art_pixel_y_bottom)
-                .map(|p| get_ratatui_color(app, p.color_id, Color::DarkGray))
+                .map(|p| get_ratatui_color(app, p.color, Color::DarkGray))
                 .unwrap_or(Color::DarkGray);
 
             let cell_char = '▀';
