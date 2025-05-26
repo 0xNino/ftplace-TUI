@@ -138,17 +138,19 @@ impl App {
     /// Update the persistent cooldown status
     pub fn update_cooldown_status(&mut self) {
         if let Some(user_info) = &self.user_info {
-            if user_info.pixel_buffer > 0 {
-                let available_pixels = if let Some(timers) = &user_info.timers {
-                    user_info.pixel_buffer - timers.len() as i32
-                } else {
-                    user_info.pixel_buffer
-                };
+            let available_pixels = if let Some(timers) = &user_info.timers {
+                user_info.pixel_buffer - timers.len() as i32
+            } else {
+                user_info.pixel_buffer
+            };
+
+            if available_pixels > 0 {
                 self.cooldown_status = format!("Buffer: {} pixels available", available_pixels);
             } else if let Some(timers) = &user_info.timers {
                 if !timers.is_empty() {
                     let current_time_ms = chrono::Utc::now().timestamp_millis();
                     let mut active_timers = Vec::new();
+                    let mut next_available_ms = i64::MAX;
 
                     for (i, &timer_ms) in timers.iter().enumerate() {
                         let remaining_ms = timer_ms - current_time_ms;
@@ -161,22 +163,49 @@ impl App {
                             } else {
                                 active_timers.push(format!("T{}:{}s", i + 1, remaining_secs));
                             }
+
+                            // Track the earliest timer for next pixel available
+                            if timer_ms < next_available_ms {
+                                next_available_ms = timer_ms;
+                            }
                         }
                     }
 
                     if active_timers.is_empty() {
                         self.cooldown_status = "Ready to place pixels".to_string();
                     } else {
-                        self.cooldown_status = format!("Cooldowns: {}", active_timers.join(", "));
+                        // Calculate next pixel available time
+                        let next_remaining_ms = next_available_ms - current_time_ms;
+                        let next_remaining_secs = (next_remaining_ms as f64 / 1000.0).ceil() as u64;
+
+                        let next_pixel_str = if next_remaining_secs > 60 {
+                            let minutes = next_remaining_secs / 60;
+                            let seconds = next_remaining_secs % 60;
+                            format!("{}m{}s", minutes, seconds)
+                        } else {
+                            format!("{}s", next_remaining_secs)
+                        };
+
+                        self.cooldown_status = format!(
+                            "Next pixel: {} | All: {}",
+                            next_pixel_str,
+                            active_timers.join(", ")
+                        );
                     }
                 } else {
-                    self.cooldown_status = format!("Cooldown: {}s", user_info.pixel_timer / 1000);
+                    self.cooldown_status = format!(
+                        "No active timers - Cooldown: {}s",
+                        user_info.pixel_timer / 1000
+                    );
                 }
             } else {
-                self.cooldown_status = format!("Cooldown: {}s", user_info.pixel_timer / 1000);
+                self.cooldown_status = format!(
+                    "No timers data - Cooldown: {}s",
+                    user_info.pixel_timer / 1000
+                );
             }
         } else {
-            self.cooldown_status = "No user info available".to_string();
+            self.cooldown_status = "No user info available - use 'p' to fetch profile".to_string();
         }
     }
 

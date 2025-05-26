@@ -57,7 +57,8 @@ impl App {
                 self.board = board_response.board;
                 self.colors = board_response.colors;
 
-                self.add_status_message(format!(
+                // Set status message directly without adding to history to avoid overriding other logs
+                self.status_message = format!(
                     "Board data loaded in {}ms. {} colors. Board size: {}x{}. Arrows to scroll.",
                     load_time,
                     self.colors.len(),
@@ -67,20 +68,25 @@ impl App {
                     } else {
                         self.board[0].len()
                     }
-                ));
+                );
 
                 self.last_board_refresh = Some(Instant::now());
                 if !self.initial_board_fetched {
                     self.initial_board_fetched = true;
                 }
+
+                // Recalculate queue totals now that we have updated board data
+                self.recalculate_queue_totals();
+
                 // Save tokens in case they were refreshed during the API call
                 self.save_tokens();
             }
             BoardFetchResult::Error(error_msg) => {
-                self.add_status_message(format!(
+                // Set status message directly without adding to history to avoid overriding other logs
+                self.status_message = format!(
                     "Error fetching board after {}ms: {}. Try 'r' to refresh.",
                     load_time, error_msg
-                ));
+                );
                 self.last_board_refresh = Some(Instant::now());
             }
         }
@@ -126,6 +132,10 @@ impl App {
                 if !self.initial_board_fetched {
                     self.initial_board_fetched = true;
                 }
+
+                // Recalculate queue totals now that we have updated board data
+                self.recalculate_queue_totals();
+
                 // Save tokens in case they were refreshed during the API call
                 self.save_tokens();
             }

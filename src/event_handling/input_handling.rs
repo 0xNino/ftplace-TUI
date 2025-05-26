@@ -64,7 +64,6 @@ impl App {
         }
 
         if should_refresh_board {
-            self.add_status_message("Auto-refreshing board...".to_string());
             self.trigger_board_fetch();
         }
 
@@ -332,6 +331,11 @@ impl App {
                 KeyCode::Down => self.board_viewport_y = self.board_viewport_y.saturating_add(10),
                 KeyCode::Left => self.board_viewport_x = self.board_viewport_x.saturating_sub(5),
                 KeyCode::Right => self.board_viewport_x = self.board_viewport_x.saturating_add(5),
+                KeyCode::Esc => {
+                    if self.queue_processing {
+                        self.cancel_queue_processing();
+                    }
+                }
                 KeyCode::Char('q') => self.exit = true,
                 KeyCode::Char('c') => {
                     self.input_mode = InputMode::EnterAccessToken;
@@ -381,6 +385,14 @@ impl App {
                     self.status_message =
                         "Work Queue Management. Use arrows to navigate, Enter to start processing."
                             .to_string();
+                }
+                KeyCode::Char(' ') => {
+                    // Toggle queue pause/resume
+                    self.toggle_queue_pause();
+                }
+                KeyCode::Char('s') => {
+                    // Toggle pause/resume for selected queue item (s for suspend/start)
+                    self.toggle_selected_queue_item_pause();
                 }
                 _ => {}
             }
@@ -653,12 +665,14 @@ impl App {
                 // Clear queue
                 self.art_queue.clear();
                 self.queue_selection_index = 0;
+                let _ = self.save_queue(); // Auto-save after clearing
                 self.status_message = "Queue cleared.".to_string();
             }
             KeyCode::Delete | KeyCode::Char('d') => {
                 // Remove selected item from queue
                 if !self.art_queue.is_empty() && self.queue_selection_index < self.art_queue.len() {
                     let removed_art = self.art_queue.remove(self.queue_selection_index);
+                    let _ = self.save_queue(); // Auto-save after removal
                     self.status_message = format!("Removed '{}' from queue.", removed_art.art.name);
                     if self.queue_selection_index >= self.art_queue.len()
                         && !self.art_queue.is_empty()
@@ -704,6 +718,10 @@ impl App {
                     self.status_message =
                         "No pixel arts available. Create some first with 'e'.".to_string();
                 }
+            }
+            KeyCode::Char(' ') => {
+                // Toggle queue pause/resume
+                self.toggle_queue_pause();
             }
             _ => {}
         }

@@ -211,14 +211,17 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
                 String::new()
             };
 
+            let pause_indicator = if item.paused { " ⏸️" } else { "" };
+
             let item_text = format!(
-                "{} P{} '{}' @ ({},{}){}",
+                "{} P{} '{}' @ ({},{}){}{}",
                 status_symbol,
                 item.priority,
                 item.art.name,
                 item.art.board_x,
                 item.art.board_y,
-                progress
+                progress,
+                pause_indicator
             );
 
             let mut list_item = ListItem::new(item_text);
@@ -256,13 +259,15 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
     let pending_count = app
         .art_queue
         .iter()
-        .filter(|item| item.status == crate::app_state::QueueStatus::Pending)
+        .filter(|item| item.status == crate::app_state::QueueStatus::Pending && !item.paused)
         .count();
+
+    let paused_count = app.art_queue.iter().filter(|item| item.paused).count();
 
     let total_pixels = app
         .art_queue
         .iter()
-        .filter(|item| item.status == crate::app_state::QueueStatus::Pending)
+        .filter(|item| item.status == crate::app_state::QueueStatus::Pending && !item.paused)
         .map(|item| item.pixels_total)
         .sum::<usize>();
 
@@ -272,6 +277,7 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::from(format!("Pending: {}", pending_count)),
+        Line::from(format!("Paused: {}", paused_count)),
         Line::from(format!("Total Pixels: {}", total_pixels)),
         Line::from(""),
         Line::from(Span::styled(
@@ -282,6 +288,8 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
         Line::from("u/k  : Move item up"),
         Line::from("j/n  : Move item down"),
         Line::from("Enter: Start processing"),
+        Line::from("Space: Pause/Resume queue"),
+        Line::from("s    : Suspend/Start item"),
         Line::from("1-5  : Set priority"),
         Line::from("d/Del: Remove item"),
         Line::from("c    : Clear queue"),

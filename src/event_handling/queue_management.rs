@@ -32,6 +32,7 @@ impl App {
                 // Update the queue item progress in our local queue
                 if let Some(item) = self.art_queue.get_mut(item_index) {
                     item.pixels_placed = pixels_placed; // Now correctly using actual successful placements
+                    item.pixels_total = total_pixels; // Update total to reflect actual pixels that need placing
                 }
 
                 let base_msg = format!(
@@ -78,6 +79,7 @@ impl App {
                 if let Some(item) = self.art_queue.get_mut(item_index) {
                     item.status = QueueStatus::Complete;
                     item.pixels_placed = pixels_placed;
+                    item.pixels_total = total_pixels; // Update total to reflect actual pixels that needed placing
                 }
 
                 self.status_message = format!(
@@ -157,6 +159,29 @@ impl App {
                 self.queue_processing_start = None;
                 self.queue_receiver = None;
             }
+            QueueUpdate::QueuePaused {
+                item_index,
+                art_name,
+                pixels_placed,
+                total_pixels,
+            } => {
+                self.queue_paused = true;
+                self.status_message = format!(
+                    "Queue paused at item {}: '{}' - {}/{} pixels placed. Press 'space' to resume.",
+                    item_index + 1,
+                    art_name,
+                    pixels_placed,
+                    total_pixels
+                );
+            }
+            QueueUpdate::QueueResumed {
+                item_index,
+                art_name,
+            } => {
+                self.queue_paused = false;
+                self.status_message =
+                    format!("Queue resumed at item {}: '{}'", item_index + 1, art_name);
+            }
         }
     }
 
@@ -164,24 +189,41 @@ impl App {
     pub async fn add_art_to_queue(&mut self, art: PixelArt) {
         let meaningful_pixels = self.filter_meaningful_pixels(&art);
 
+        // Calculate pixels that are already correct
+        let pixels_already_correct = meaningful_pixels
+            .iter()
+            .filter(|art_pixel| {
+                let abs_x = art.board_x + art_pixel.x;
+                let abs_y = art.board_y + art_pixel.y;
+                self.is_pixel_already_correct(abs_x, abs_y, art_pixel.color)
+            })
+            .count();
+
         let queue_item = ArtQueueItem {
             art: art.clone(),
             priority: 3, // Default priority
             status: QueueStatus::Pending,
-            pixels_placed: 0,
-            pixels_total: meaningful_pixels.len(),
+            pixels_placed: 0, // Start with 0, only count actually placed pixels
+            pixels_total: meaningful_pixels.len(), // Total meaningful pixels
             added_time: Instant::now(),
+            paused: false, // Default to not paused
         };
 
         self.art_queue.push(queue_item);
         self.sort_queue_by_priority();
 
+        // Auto-save queue
+        let _ = self.save_queue();
+
+        let pixels_needing_placement = meaningful_pixels.len() - pixels_already_correct;
         self.status_message = format!(
-            "Added '{}' to queue at position ({}, {}) with {} meaningful pixels.",
+            "Added '{}' to queue at position ({}, {}) - {}/{} pixels correct, {} need placement.",
             art.name,
             art.board_x,
             art.board_y,
-            meaningful_pixels.len()
+            pixels_already_correct,
+            meaningful_pixels.len(),
+            pixels_needing_placement
         );
     }
 
@@ -239,6 +281,10 @@ impl App {
         let (tx, rx) = mpsc::unbounded_channel();
         self.queue_receiver = Some(rx);
 
+        // Create channel for queue control (pause/resume)
+        let (control_tx, control_rx) = mpsc::unbounded_channel();
+        self.queue_control_sender = Some(control_tx);
+
         // Clone API client data and queue data needed for processing
         let base_url = self.api_client.get_base_url();
         let access_token = self.api_client.get_access_token_clone();
@@ -248,7 +294,7 @@ impl App {
             .art_queue
             .iter()
             .enumerate()
-            .filter(|(_, item)| item.status == QueueStatus::Pending)
+            .filter(|(_, item)| item.status == QueueStatus::Pending && !item.paused)
             .map(|(index, item)| (index, item.clone()))
             .collect();
 
@@ -265,8 +311,64 @@ impl App {
             let mut processed_count = 0;
             let mut total_pixels_placed = 0;
             let start_time = Instant::now();
+            let mut is_paused = false;
+            let mut control_rx = control_rx; // Make it mutable
 
             for (original_index, queue_item) in queue_items {
+                // Check for pause/resume commands
+                while let Ok(control_cmd) = control_rx.try_recv() {
+                    match control_cmd {
+                        crate::app_state::QueueControl::Pause => {
+                            is_paused = true;
+                            let _ = tx.send(QueueUpdate::QueuePaused {
+                                item_index: original_index,
+                                art_name: queue_item.art.name.clone(),
+                                pixels_placed: 0,
+                                total_pixels: 0,
+                            });
+                        }
+                        crate::app_state::QueueControl::Resume => {
+                            is_paused = false;
+                            let _ = tx.send(QueueUpdate::QueueResumed {
+                                item_index: original_index,
+                                art_name: queue_item.art.name.clone(),
+                            });
+                        }
+                        crate::app_state::QueueControl::Cancel => {
+                            let _ = tx.send(QueueUpdate::QueueCancelled {
+                                items_processed: processed_count,
+                                total_pixels_placed,
+                            });
+                            return;
+                        }
+                    }
+                }
+
+                // Wait while paused
+                while is_paused {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    // Check for resume command
+                    while let Ok(control_cmd) = control_rx.try_recv() {
+                        match control_cmd {
+                            crate::app_state::QueueControl::Resume => {
+                                is_paused = false;
+                                let _ = tx.send(QueueUpdate::QueueResumed {
+                                    item_index: original_index,
+                                    art_name: queue_item.art.name.clone(),
+                                });
+                            }
+                            crate::app_state::QueueControl::Cancel => {
+                                let _ = tx.send(QueueUpdate::QueueCancelled {
+                                    items_processed: processed_count,
+                                    total_pixels_placed,
+                                });
+                                return;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
                 // Send item started update
                 let _ = tx.send(QueueUpdate::ItemStarted {
                     item_index: original_index,
@@ -274,9 +376,26 @@ impl App {
                     total_items: processed_count + 1, // Will be corrected as we process
                 });
 
-                // Filter meaningful pixels for this art and exclude already-correct pixels
+                // Filter meaningful pixels for this art
                 let meaningful_pixels = Self::filter_meaningful_pixels_static(&queue_item.art);
-                let total_meaningful_pixels = meaningful_pixels.len(); // Calculate length before move
+                let total_meaningful_pixels = meaningful_pixels.len();
+
+                // Count pixels already correct at start
+                let pixels_already_correct_at_start = meaningful_pixels
+                    .iter()
+                    .filter(|art_pixel| {
+                        let abs_x = queue_item.art.board_x + art_pixel.x;
+                        let abs_y = queue_item.art.board_y + art_pixel.y;
+                        Self::is_pixel_already_correct_static(
+                            &board_state,
+                            abs_x,
+                            abs_y,
+                            art_pixel.color,
+                        )
+                    })
+                    .count();
+
+                // Filter pixels that need to be placed
                 let pixels_to_place: Vec<_> = meaningful_pixels
                     .into_iter()
                     .enumerate()
@@ -303,7 +422,7 @@ impl App {
                     continue;
                 }
 
-                let mut pixels_placed_for_item = 0;
+                let mut pixels_placed_for_item = 0; // Only count actually placed pixels
                 let mut user_info: Option<UserInfos> = None;
 
                 // Process each pixel that needs to be placed
@@ -321,10 +440,12 @@ impl App {
                             let _minutes = wait_time / 60;
                             let _seconds = wait_time % 60;
 
+                            let display_pixels_placed =
+                                pixels_placed_for_item + pixels_already_correct_at_start;
                             let _ = tx.send(QueueUpdate::ItemProgress {
                                 item_index: original_index,
                                 art_name: queue_item.art.name.clone(),
-                                pixels_placed: pixels_placed_for_item,
+                                pixels_placed: display_pixels_placed,
                                 total_pixels: total_meaningful_pixels,
                                 position: (abs_x, abs_y),
                                 cooldown_remaining: Some(wait_time as u32),
@@ -336,10 +457,12 @@ impl App {
                                 tokio::time::sleep(Duration::from_secs(60)).await;
                                 remaining_wait = remaining_wait.saturating_sub(60);
 
+                                let display_pixels_placed =
+                                    pixels_placed_for_item + pixels_already_correct_at_start;
                                 let _ = tx.send(QueueUpdate::ItemProgress {
                                     item_index: original_index,
                                     art_name: queue_item.art.name.clone(),
-                                    pixels_placed: pixels_placed_for_item,
+                                    pixels_placed: display_pixels_placed,
                                     total_pixels: total_meaningful_pixels,
                                     position: (abs_x, abs_y),
                                     cooldown_remaining: Some(remaining_wait as u32),
@@ -352,10 +475,12 @@ impl App {
                             }
                         } else if wait_time > 0 {
                             // Short cooldown - wait normally
+                            let display_pixels_placed =
+                                pixels_placed_for_item + pixels_already_correct_at_start;
                             let _ = tx.send(QueueUpdate::ItemProgress {
                                 item_index: original_index,
                                 art_name: queue_item.art.name.clone(),
-                                pixels_placed: pixels_placed_for_item,
+                                pixels_placed: display_pixels_placed,
                                 total_pixels: total_meaningful_pixels,
                                 position: (abs_x, abs_y),
                                 cooldown_remaining: Some(wait_time as u32),
@@ -366,26 +491,25 @@ impl App {
                     }
 
                     // Send placement progress update
+                    // For display purposes, include already correct pixels in the count
+                    let display_pixels_placed =
+                        pixels_placed_for_item + pixels_already_correct_at_start;
                     let _ = tx.send(QueueUpdate::ItemProgress {
                         item_index: original_index,
                         art_name: queue_item.art.name.clone(),
-                        pixels_placed: pixels_placed_for_item,
+                        pixels_placed: display_pixels_placed,
                         total_pixels: total_meaningful_pixels,
                         position: (abs_x, abs_y),
                         cooldown_remaining: None,
                     });
 
-                    // Attempt to place the pixel (with minimal retries for cooldown errors)
-                    let mut pixel_placement_success = false;
-                    const MAX_RETRIES: u32 = 1; // Reduced retries since we wait properly now
-
-                    for retry_attempt in 0..=MAX_RETRIES {
+                    // Attempt to place the pixel (no retries for cooldown errors)
+                    loop {
                         match api_client.place_pixel(abs_x, abs_y, art_pixel.color).await {
                             Ok(response) => {
                                 pixels_placed_for_item += 1;
                                 total_pixels_placed += 1;
                                 user_info = Some(response.user_infos);
-                                pixel_placement_success = true;
                                 break; // Successfully placed, move to next pixel
                             }
                             Err(e) => {
@@ -432,34 +556,37 @@ impl App {
                                                 }
                                             }
 
-                                            // For cooldown errors, wait immediately and only retry once
-                                            if retry_attempt < MAX_RETRIES {
-                                                if let Some(ref info) = user_info {
-                                                    let (_, wait_time) =
-                                                        should_pause_queue_processing(info);
-
-                                                    let _ = tx.send(QueueUpdate::ItemProgress {
-                                                        item_index: original_index,
-                                                        art_name: queue_item.art.name.clone(),
-                                                        pixels_placed: pixels_placed_for_item,
-                                                        total_pixels: total_meaningful_pixels,
-                                                        position: (abs_x, abs_y),
-                                                        cooldown_remaining: Some(wait_time as u32),
-                                                    });
-
-                                                    // Wait for the cooldown period
-                                                    tokio::time::sleep(Duration::from_secs(
-                                                        wait_time,
-                                                    ))
-                                                    .await;
+                                            // For cooldown errors, wait for cooldown and retry
+                                            let wait_time = if let Some(ref info) = user_info {
+                                                let calculated_wait =
+                                                    calculate_cooldown_wait_time(info);
+                                                // For 425 errors, if calculated time is very small, it means
+                                                // the timer calculation failed - use a longer fallback
+                                                if calculated_wait < 5 {
+                                                    30 // 30 seconds when calculation seems wrong
+                                                } else {
+                                                    calculated_wait
                                                 }
-                                                // Continue to retry after waiting
-                                                continue;
                                             } else {
-                                                // Max retries reached for this pixel - skip it and continue with next
-                                                // The cooldown will be respected when we start the next pixel
-                                                break;
-                                            }
+                                                30 // Default 30 seconds if no user info
+                                            };
+
+                                            let display_pixels_placed = pixels_placed_for_item
+                                                + pixels_already_correct_at_start;
+                                            let _ = tx.send(QueueUpdate::ItemProgress {
+                                                item_index: original_index,
+                                                art_name: queue_item.art.name.clone(),
+                                                pixels_placed: display_pixels_placed,
+                                                total_pixels: total_meaningful_pixels,
+                                                position: (abs_x, abs_y),
+                                                cooldown_remaining: Some(wait_time as u32),
+                                            });
+
+                                            // Wait for the full cooldown period
+                                            tokio::time::sleep(Duration::from_secs(wait_time))
+                                                .await;
+                                            // Continue to retry after waiting
+                                            continue;
                                         } else {
                                             // Other API errors (auth, server error, etc.) - stop processing
                                             let _ = tx.send(QueueUpdate::ItemFailed {
@@ -493,17 +620,17 @@ impl App {
                         }
                     }
 
-                    // Small delay between pixels (only when successful)
-                    if pixel_placement_success {
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                    }
+                    // Small delay between pixels
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
 
                 // Send item completion update
+                let display_pixels_placed =
+                    pixels_placed_for_item + pixels_already_correct_at_start;
                 let _ = tx.send(QueueUpdate::ItemCompleted {
                     item_index: original_index,
                     art_name: queue_item.art.name.clone(),
-                    pixels_placed: pixels_placed_for_item,
+                    pixels_placed: display_pixels_placed,
                     total_pixels: total_meaningful_pixels,
                 });
 
@@ -520,6 +647,169 @@ impl App {
         });
     }
 
+    /// Pause queue processing
+    pub fn pause_queue(&mut self) {
+        if !self.queue_processing {
+            self.status_message = "No queue processing to pause.".to_string();
+            return;
+        }
+
+        if self.queue_paused {
+            self.status_message = "Queue is already paused.".to_string();
+            return;
+        }
+
+        // Send pause command to background task
+        if let Some(sender) = &self.queue_control_sender {
+            if sender.send(crate::app_state::QueueControl::Pause).is_ok() {
+                self.queue_paused = true;
+                self.status_message =
+                    "Queue processing paused. Press 'space' to resume.".to_string();
+            } else {
+                self.status_message = "Failed to pause queue processing.".to_string();
+            }
+        } else {
+            self.status_message = "No queue control channel available.".to_string();
+        }
+    }
+
+    /// Resume queue processing
+    pub fn resume_queue(&mut self) {
+        if !self.queue_processing {
+            self.status_message = "No queue processing to resume.".to_string();
+            return;
+        }
+
+        if !self.queue_paused {
+            self.status_message = "Queue is not paused.".to_string();
+            return;
+        }
+
+        // Send resume command to background task
+        if let Some(sender) = &self.queue_control_sender {
+            if sender.send(crate::app_state::QueueControl::Resume).is_ok() {
+                self.queue_paused = false;
+                self.status_message = "Queue processing resumed.".to_string();
+            } else {
+                self.status_message = "Failed to resume queue processing.".to_string();
+            }
+        } else {
+            self.status_message = "No queue control channel available.".to_string();
+        }
+    }
+
+    /// Toggle queue pause/resume
+    pub fn toggle_queue_pause(&mut self) {
+        if !self.queue_processing {
+            self.status_message = "No queue processing active.".to_string();
+            return;
+        }
+
+        if self.queue_paused {
+            self.resume_queue();
+        } else {
+            self.pause_queue();
+        }
+    }
+
+    /// Pause individual queue item
+    pub fn pause_queue_item(&mut self, index: usize) {
+        if index >= self.art_queue.len() {
+            self.status_message = "Invalid queue item index.".to_string();
+            return;
+        }
+
+        if self.art_queue[index].paused {
+            self.status_message = format!(
+                "Queue item '{}' is already paused.",
+                self.art_queue[index].art.name
+            );
+            return;
+        }
+
+        self.art_queue[index].paused = true;
+        self.status_message = format!(
+            "Paused queue item '{}'. It will be skipped during processing.",
+            self.art_queue[index].art.name
+        );
+    }
+
+    /// Resume individual queue item
+    pub fn resume_queue_item(&mut self, index: usize) {
+        if index >= self.art_queue.len() {
+            self.status_message = "Invalid queue item index.".to_string();
+            return;
+        }
+
+        if !self.art_queue[index].paused {
+            self.status_message = format!(
+                "Queue item '{}' is not paused.",
+                self.art_queue[index].art.name
+            );
+            return;
+        }
+
+        self.art_queue[index].paused = false;
+        self.status_message = format!(
+            "Resumed queue item '{}'. It will be processed normally.",
+            self.art_queue[index].art.name
+        );
+    }
+
+    /// Toggle pause/resume for individual queue item
+    pub fn toggle_queue_item_pause(&mut self, index: usize) {
+        if index >= self.art_queue.len() {
+            self.status_message = "Invalid queue item index.".to_string();
+            return;
+        }
+
+        if self.art_queue[index].paused {
+            self.resume_queue_item(index);
+        } else {
+            self.pause_queue_item(index);
+        }
+    }
+
+    /// Toggle pause/resume for currently selected queue item
+    pub fn toggle_selected_queue_item_pause(&mut self) {
+        self.toggle_queue_item_pause(self.queue_selection_index);
+    }
+
+    /// Recalculate queue totals based on current board state
+    /// Call this after board refreshes to update pixel counts
+    pub fn recalculate_queue_totals(&mut self) {
+        // Clone the board and colors to avoid borrowing issues
+        let board = self.board.clone();
+        let colors = self.colors.clone();
+
+        for item in &mut self.art_queue {
+            // Only recalculate for pending items
+            if item.status != QueueStatus::Pending {
+                continue;
+            }
+
+            // Filter meaningful pixels using static method to avoid borrowing self
+            let meaningful_pixels = Self::filter_meaningful_pixels_for_art(&item.art, &colors);
+            let pixels_already_correct = meaningful_pixels
+                .iter()
+                .filter(|art_pixel| {
+                    let abs_x = item.art.board_x + art_pixel.x;
+                    let abs_y = item.art.board_y + art_pixel.y;
+                    Self::is_pixel_already_correct_static(&board, abs_x, abs_y, art_pixel.color)
+                })
+                .count();
+
+            // Update totals - total is all meaningful pixels, placed should remain 0 for pending items
+            item.pixels_total = meaningful_pixels.len();
+            // Don't update pixels_placed for pending items - it should only track actually placed pixels
+
+            // If all pixels are now correct, mark as complete
+            if pixels_already_correct == meaningful_pixels.len() {
+                item.status = QueueStatus::Complete;
+            }
+        }
+    }
+
     /// Static helper for filtering meaningful pixels (used in spawned tasks)
     fn filter_meaningful_pixels_static(art: &PixelArt) -> Vec<ArtPixel> {
         let mut meaningful_pixels = Vec::new();
@@ -532,6 +822,47 @@ impl App {
             if seen_positions.contains(&position) {
                 continue;
             }
+            meaningful_pixels.push(pixel.clone());
+            seen_positions.insert(position);
+        }
+
+        meaningful_pixels
+    }
+
+    /// Static helper for filtering meaningful pixels with color filtering
+    fn filter_meaningful_pixels_for_art(
+        art: &PixelArt,
+        colors: &[crate::api_client::ColorInfo],
+    ) -> Vec<ArtPixel> {
+        let mut meaningful_pixels = Vec::new();
+        let mut seen_positions = HashSet::new();
+
+        // Define background color IDs that should not be placed
+        let mut background_color_ids = HashSet::new();
+        for color in colors {
+            let name_lower = color.name.to_lowercase();
+            if name_lower.contains("transparent")
+                || name_lower.contains("background")
+                || name_lower.contains("empty")
+                || name_lower == "none"
+                || name_lower.contains("alpha")
+            {
+                background_color_ids.insert(color.id);
+            }
+        }
+
+        for pixel in &art.pattern {
+            // Skip if this position was already processed (remove duplicates)
+            let position = (pixel.x, pixel.y);
+            if seen_positions.contains(&position) {
+                continue;
+            }
+
+            // Skip background/transparent colors
+            if background_color_ids.contains(&pixel.color) {
+                continue;
+            }
+
             meaningful_pixels.push(pixel.clone());
             seen_positions.insert(position);
         }
@@ -700,6 +1031,44 @@ impl App {
 
         Ok(pixels_placed)
     }
+
+    /// Cancel queue processing
+    pub fn cancel_queue_processing(&mut self) {
+        if !self.queue_processing {
+            self.status_message = "No queue processing to cancel.".to_string();
+            return;
+        }
+
+        // Send cancel command to background task
+        if let Some(sender) = &self.queue_control_sender {
+            let _ = sender.send(crate::app_state::QueueControl::Cancel);
+        }
+
+        // Reset queue processing state
+        self.queue_processing = false;
+        self.queue_paused = false;
+        self.queue_receiver = None;
+        self.queue_control_sender = None;
+        self.status_message = "Queue processing cancelled.".to_string();
+    }
+
+    /// Save queue to file
+    pub fn save_queue(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let queue_data = serde_json::to_string_pretty(&self.art_queue)?;
+        std::fs::write("queue.json", queue_data)?;
+        Ok(())
+    }
+
+    /// Load queue from file
+    pub fn load_queue(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if std::path::Path::new("queue.json").exists() {
+            let queue_data = std::fs::read_to_string("queue.json")?;
+            self.art_queue = serde_json::from_str(&queue_data)?;
+            self.status_message =
+                format!("Loaded {} items from saved queue.", self.art_queue.len());
+        }
+        Ok(())
+    }
 }
 
 /// Calculate how long to wait before we can place a pixel based on user timers and buffer
@@ -712,12 +1081,13 @@ pub fn calculate_cooldown_wait_time(user_info: &UserInfos) -> u64 {
     // No buffer available, check timers to see when we can place next
     if let Some(timers) = &user_info.timers {
         if timers.is_empty() {
-            // No active timers, use pixel_timer as fallback but be conservative
+            // No active timers - this usually means user has no pixels available for a long time
+            // Use pixel_timer as base but be more conservative
             let fallback_time = (user_info.pixel_timer as f64 / 1000.0) as u64;
-            return fallback_time.max(5); // Minimum 5 seconds
+            return fallback_time.max(60); // Minimum 1 minute when no timers
         }
 
-        // Find the earliest timer that will expire (most important change)
+        // Find the earliest timer that will expire
         let current_time_ms = chrono::Utc::now().timestamp_millis();
         let mut earliest_expiry = i64::MAX;
 
@@ -728,20 +1098,22 @@ pub fn calculate_cooldown_wait_time(user_info: &UserInfos) -> u64 {
         }
 
         if earliest_expiry == i64::MAX {
-            // All timers have expired - we should be able to place now
-            return 0;
+            // All timers have expired but we still got 425 error
+            // This suggests the user has no pixels available for a longer period
+            let fallback_time = (user_info.pixel_timer as f64 / 1000.0) as u64;
+            return fallback_time.max(60); // Minimum 1 minute
         }
 
         // Calculate exact wait time in seconds
         let wait_time_ms = earliest_expiry - current_time_ms;
         let wait_time_secs = (wait_time_ms as f64 / 1000.0).ceil() as u64;
 
-        // Return the exact time (no artificial minimums for accurate timing)
-        wait_time_secs + 1 // Just 1 second buffer for timing precision
+        // Return the calculated time with small buffer
+        wait_time_secs.max(1) + 2 // Minimum 1 second + 2 second buffer
     } else {
-        // No timer data, fall back to pixel_timer but be conservative
+        // No timer data at all - very conservative fallback
         let fallback_time = (user_info.pixel_timer as f64 / 1000.0) as u64;
-        fallback_time.max(5) // Minimum 5 seconds
+        fallback_time.max(120) // Minimum 2 minutes when no timer data
     }
 }
 

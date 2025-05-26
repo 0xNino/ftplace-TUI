@@ -332,8 +332,8 @@ fn render_queue_overlay(app: &App, frame: &mut Frame, inner_board_area: &Rect) {
                     // Get the target color for this pixel
                     let target_color = get_ratatui_color(app, art_pixel.color, Color::White);
 
-                    if is_placed || is_already_correct {
-                        // Show pixels that are placed or already correct in their target color
+                    if is_placed {
+                        // Show pixels that were actually placed by queue processing
                         cell.set_char('▀');
                         if (art_abs_y - app.board_viewport_y as i32) % 2 == 0 {
                             cell.set_fg(target_color);
@@ -387,14 +387,14 @@ fn render_status_area(app: &App, frame: &mut Frame, area: Rect) {
     // Build multi-line status text
     let mut status_lines = Vec::new();
 
-    // Add cooldown status if available
-    if !app.cooldown_status.is_empty() {
-        status_lines.push(format!("🕐 {}", app.cooldown_status));
+    // Add recent status messages first (newest first, limit to 2 for space)
+    for (message, _timestamp) in app.status_messages.iter().rev().take(2) {
+        status_lines.push(format!("• {}", message));
     }
 
-    // Add recent status messages (newest first, limit to 3 for space)
-    for (message, _timestamp) in app.status_messages.iter().rev().take(3) {
-        status_lines.push(format!("• {}", message));
+    // Add cooldown status if available (always show this prominently)
+    if !app.cooldown_status.is_empty() {
+        status_lines.push(format!("🕐 {}", app.cooldown_status));
     }
 
     // If no messages, show the main status

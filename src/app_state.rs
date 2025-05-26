@@ -21,7 +21,7 @@ pub enum InputMode {
     ShowProfile,            // New mode for displaying user profile
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum QueueStatus {
     Pending,
     InProgress,
@@ -30,14 +30,16 @@ pub enum QueueStatus {
     Failed,  // If placement failed
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArtQueueItem {
     pub art: PixelArt,
     pub priority: u8, // 1=high, 5=low
     pub status: QueueStatus,
     pub pixels_placed: usize, // Track progress
     pub pixels_total: usize,  // Total meaningful pixels
-    pub added_time: Instant,  // When added to queue
+    #[serde(skip, default = "std::time::Instant::now")]
+    pub added_time: Instant, // When added to queue
+    pub paused: bool,         // Whether this individual item is paused
 }
 
 #[derive(Debug)]
@@ -67,6 +69,7 @@ pub struct App {
     pub placement_start: Option<Instant>, // When placement started
     pub placement_cancel_requested: bool, // Flag to request cancellation
     pub queue_receiver: Option<mpsc::UnboundedReceiver<QueueUpdate>>, // Channel for receiving queue processing updates
+    pub queue_control_sender: Option<mpsc::UnboundedSender<QueueControl>>, // Channel for sending pause/resume commands
     pub queue_processing_start: Option<Instant>, // When queue processing started
     pub profile_receiver: Option<mpsc::UnboundedReceiver<ProfileFetchResult>>, // Channel for receiving profile fetch results
 
@@ -95,6 +98,7 @@ pub struct App {
     pub art_queue: Vec<ArtQueueItem>, // Queue of arts to be placed
     pub queue_selection_index: usize, // Current selection in queue list
     pub queue_processing: bool,       // Whether queue is currently being processed
+    pub queue_paused: bool,           // Whether queue processing is paused
     pub queue_blink_state: bool,      // For blinking preview effect
     pub last_blink_time: Option<Instant>, // Last time blink state changed
 }
@@ -174,10 +178,27 @@ pub enum QueueUpdate {
         items_processed: usize,
         total_pixels_placed: usize,
     },
+    QueuePaused {
+        item_index: usize,
+        art_name: String,
+        pixels_placed: usize,
+        total_pixels: usize,
+    },
+    QueueResumed {
+        item_index: usize,
+        art_name: String,
+    },
 }
 
 #[derive(Debug)]
 pub enum ProfileFetchResult {
     Success(crate::api_client::UserInfos),
     Error(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum QueueControl {
+    Pause,
+    Resume,
+    Cancel,
 }

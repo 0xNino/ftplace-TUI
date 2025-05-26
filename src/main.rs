@@ -68,7 +68,7 @@ impl App {
                 )
             };
 
-        Self {
+        let mut app = Self {
             exit: false,
             api_client,
             token_storage,
@@ -94,6 +94,7 @@ impl App {
             placement_start: None,
             placement_cancel_requested: false,
             queue_receiver: None,
+            queue_control_sender: None,
             queue_processing_start: None,
             profile_receiver: None,
             base_url_options,
@@ -112,9 +113,15 @@ impl App {
             art_queue: Vec::new(),
             queue_selection_index: 0,
             queue_processing: false,
+            queue_paused: false,
             queue_blink_state: false,
             last_blink_time: None,
-        }
+        };
+
+        // Load saved queue
+        let _ = app.load_queue();
+
+        app
     }
 
     pub async fn run(&mut self, terminal: &mut Terminal<impl Backend>) -> io::Result<()> {
