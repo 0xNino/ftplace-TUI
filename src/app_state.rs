@@ -106,6 +106,9 @@ pub struct App {
     // Shared board state for queue processing
     pub shared_board_state:
         Option<std::sync::Arc<std::sync::RwLock<Vec<Vec<Option<PixelNetwork>>>>>>,
+
+    // Mouse support
+    pub board_area_bounds: Option<(u16, u16, u16, u16)>, // (x, y, width, height) of the board display area
 }
 
 #[derive(Debug)]

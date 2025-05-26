@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::io::{self, stdout};
 
 use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -117,6 +118,7 @@ impl App {
             queue_blink_state: false,
             last_blink_time: None,
             shared_board_state: None,
+            board_area_bounds: None,
         };
 
         // Load saved queue
@@ -138,13 +140,13 @@ impl App {
 async fn main() -> io::Result<()> {
     enable_raw_mode()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
-    execute!(stdout(), EnterAlternateScreen)?;
+    execute!(stdout(), EnterAlternateScreen, EnableMouseCapture)?;
 
     let mut app = App::new();
     let res = app.run(&mut terminal).await;
 
     disable_raw_mode()?;
-    execute!(stdout(), LeaveAlternateScreen)?;
+    execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
 
     res
 }

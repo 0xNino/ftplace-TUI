@@ -151,6 +151,17 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
 }
 
 fn render_board_display(app: &mut App, frame: &mut Frame, area: Rect) {
+    // Store board area bounds for mouse coordinate conversion
+    let inner_board_area = area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    app.board_area_bounds = Some((
+        inner_board_area.x,
+        inner_board_area.y,
+        inner_board_area.width,
+        inner_board_area.height,
+    ));
     let board_title = if app.board_loading {
         let elapsed = app
             .board_load_start
@@ -182,11 +193,6 @@ fn render_board_display(app: &mut App, frame: &mut Frame, area: Rect) {
 
     let board_block = Block::default().borders(Borders::ALL).title(board_title);
     frame.render_widget(board_block, area);
-
-    let inner_board_area = area.inner(Margin {
-        vertical: 1,
-        horizontal: 1,
-    });
 
     // Clamp viewport coordinates
     let board_pixel_width = app.board.len();
@@ -321,10 +327,11 @@ fn render_queue_overlay(app: &App, frame: &mut Frame, inner_board_area: &Rect) {
             continue; // Don't show failed/skipped items
         }
 
-        // Filter meaningful pixels for this queue item
-        let meaningful_pixels: Vec<_> = queue_item.art.pattern.iter().enumerate().collect();
+        // Filter meaningful pixels for this queue item (same logic as queue processing)
+        let meaningful_pixels =
+            filter_meaningful_pixels_for_rendering(&queue_item.art, &app.colors);
 
-        for (pixel_index, art_pixel) in meaningful_pixels {
+        for (pixel_index, art_pixel) in meaningful_pixels.iter().enumerate() {
             let art_abs_x = queue_item.art.board_x + art_pixel.x;
             let art_abs_y = queue_item.art.board_y + art_pixel.y;
 
@@ -467,4 +474,45 @@ fn render_status_area(app: &App, frame: &mut Frame, area: Rect) {
         .wrap(Wrap { trim: true })
         .block(Block::default().borders(Borders::ALL).title("Status"));
     frame.render_widget(status_widget, area);
+}
+
+/// Filter meaningful pixels for rendering (same logic as queue processing)
+fn filter_meaningful_pixels_for_rendering(
+    art: &crate::art::PixelArt,
+    colors: &[crate::api_client::ColorInfo],
+) -> Vec<crate::art::ArtPixel> {
+    let mut meaningful_pixels = Vec::new();
+    let mut seen_positions = std::collections::HashSet::new();
+
+    // Define background color IDs that should not be placed
+    let mut background_color_ids = std::collections::HashSet::new();
+    for color in colors {
+        let name_lower = color.name.to_lowercase();
+        if name_lower.contains("transparent")
+            || name_lower.contains("background")
+            || name_lower.contains("empty")
+            || name_lower == "none"
+            || name_lower.contains("alpha")
+        {
+            background_color_ids.insert(color.id);
+        }
+    }
+
+    for pixel in &art.pattern {
+        // Skip if this position was already processed (remove duplicates)
+        let position = (pixel.x, pixel.y);
+        if seen_positions.contains(&position) {
+            continue;
+        }
+
+        // Skip background/transparent colors
+        if background_color_ids.contains(&pixel.color) {
+            continue;
+        }
+
+        meaningful_pixels.push(pixel.clone());
+        seen_positions.insert(position);
+    }
+
+    meaningful_pixels
 }

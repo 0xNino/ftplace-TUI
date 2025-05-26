@@ -21,6 +21,8 @@ pub fn render_help_popup(_app: &App, frame: &mut Frame) {
         Line::from(" h: Show status log history"),
         Line::from(" w: Work queue management"),
         Line::from(" Arrows: Scroll board viewport"),
+        Line::from(" Mouse Wheel: Scroll board viewport vertically"),
+        Line::from(" Left Click: Show coordinates (or move loaded art)"),
         Line::from(""),
         Line::from(Span::styled(
             "--- Pixel Art Placement ---",
@@ -35,6 +37,8 @@ pub fn render_help_popup(_app: &App, frame: &mut Frame) {
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::from(" Arrows: Move loaded art on board"),
+        Line::from(" Left Click: Move loaded art to mouse position"),
+        Line::from(" Right Click: Move and place art immediately"),
         Line::from(" Enter: Add positioned art to queue & start processing"),
         Line::from(" Esc: Cancel loaded art or stop queue processing"),
         Line::from(""),

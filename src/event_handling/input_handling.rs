@@ -1,6 +1,8 @@
 use crate::app_state::{App, InputMode};
 use crate::art::{get_available_pixel_arts, ArtPixel, PixelArt};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEventKind, MouseButton, MouseEvent, MouseEventKind,
+};
 use std::io;
 use std::time::Duration;
 
@@ -129,11 +131,132 @@ impl App {
                         self.handle_key_input(key_event.code).await?;
                     }
                 }
+                Event::Mouse(mouse_event) => {
+                    self.handle_mouse_input(mouse_event).await?;
+                    return Ok(()); // Exit early to render UI after mouse input
+                }
                 _ => { /* Other events */ }
             }
         } else {
             // No pending input events - all processing happens via async channels now
             // Board fetches are spawned as background tasks and results come via channels
+        }
+        Ok(())
+    }
+
+    async fn handle_mouse_input(&mut self, mouse_event: MouseEvent) -> io::Result<()> {
+        // Only handle mouse events in main mode
+        if self.input_mode != InputMode::None {
+            return Ok(());
+        }
+
+        match mouse_event.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some((board_x, board_y, board_width, board_height)) = self.board_area_bounds
+                {
+                    let mouse_x = mouse_event.column;
+                    let mouse_y = mouse_event.row;
+
+                    // Check if click is within board area
+                    if mouse_x >= board_x
+                        && mouse_x < board_x + board_width
+                        && mouse_y >= board_y
+                        && mouse_y < board_y + board_height
+                    {
+                        // Convert screen coordinates to board pixel coordinates
+                        let screen_cell_x = mouse_x - board_x;
+                        let screen_cell_y = mouse_y - board_y;
+
+                        // Each screen cell represents 2 vertical pixels (due to half-block rendering)
+                        let board_pixel_x = self.board_viewport_x as i32 + screen_cell_x as i32;
+                        let board_pixel_y =
+                            self.board_viewport_y as i32 + (screen_cell_y as i32 * 2);
+
+                        if let Some(art) = &mut self.loaded_art {
+                            // Update loaded art position
+                            art.board_x = board_pixel_x;
+                            art.board_y = board_pixel_y;
+                            self.status_message = format!(
+                                "Art '{}' moved to ({}, {}) via mouse. Press Enter to place.",
+                                art.name, art.board_x, art.board_y
+                            );
+                        } else {
+                            // No art loaded - show coordinates for reference
+                            self.status_message = format!(
+                                "Clicked at board position ({}, {}). Load art with 'l' to place here.",
+                                board_pixel_x, board_pixel_y
+                            );
+                        }
+                    }
+                }
+            }
+            MouseEventKind::Down(MouseButton::Right) => {
+                // Right click to place art immediately (only if art is loaded)
+                if let Some((board_x, board_y, board_width, board_height)) = self.board_area_bounds
+                {
+                    let mouse_x = mouse_event.column;
+                    let mouse_y = mouse_event.row;
+
+                    // Check if click is within board area
+                    if mouse_x >= board_x
+                        && mouse_x < board_x + board_width
+                        && mouse_y >= board_y
+                        && mouse_y < board_y + board_height
+                    {
+                        // Convert screen coordinates to board pixel coordinates
+                        let screen_cell_x = mouse_x - board_x;
+                        let screen_cell_y = mouse_y - board_y;
+
+                        let board_pixel_x = self.board_viewport_x as i32 + screen_cell_x as i32;
+                        let board_pixel_y =
+                            self.board_viewport_y as i32 + (screen_cell_y as i32 * 2);
+
+                        if let Some(art) = &mut self.loaded_art {
+                            // Update loaded art position and place immediately
+                            art.board_x = board_pixel_x;
+                            art.board_y = board_pixel_y;
+
+                            let art_clone = art.clone();
+                            let art_name = art.name.clone();
+
+                            // Add art to queue and start processing
+                            self.add_art_to_queue(art_clone).await;
+
+                            // Start queue processing immediately
+                            if !self.queue_processing {
+                                self.trigger_queue_processing();
+                            }
+
+                            self.status_message = format!(
+                                "Art '{}' placed at ({}, {}) via right-click.",
+                                art_name, board_pixel_x, board_pixel_y
+                            );
+                        } else {
+                            self.status_message = format!(
+                                "Right-clicked at ({}, {}). Load art with 'l' first to place.",
+                                board_pixel_x, board_pixel_y
+                            );
+                        }
+                    }
+                }
+            }
+            MouseEventKind::ScrollUp => {
+                // Scroll up - move viewport up
+                self.board_viewport_y = self.board_viewport_y.saturating_sub(5);
+                self.status_message = format!(
+                    "Scrolled up. Viewport at ({}, {})",
+                    self.board_viewport_x, self.board_viewport_y
+                );
+            }
+            MouseEventKind::ScrollDown => {
+                // Scroll down - move viewport down
+                self.board_viewport_y = self.board_viewport_y.saturating_add(5);
+                self.status_message = format!(
+                    "Scrolled down. Viewport at ({}, {})",
+                    self.board_viewport_x, self.board_viewport_y
+                );
+            }
+            _ => {} // Ignore other mouse events
         }
         Ok(())
     }

@@ -88,6 +88,9 @@ impl App {
                 // Recalculate queue totals now that we have updated board data
                 self.recalculate_queue_totals();
 
+                // Check if queue should auto-resume (after app restart)
+                self.check_auto_resume_queue();
+
                 // Save tokens in case they were refreshed during the API call
                 self.save_tokens();
             }

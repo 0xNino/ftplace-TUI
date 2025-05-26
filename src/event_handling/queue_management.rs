@@ -471,12 +471,45 @@ impl App {
                                 cooldown_remaining: Some(wait_time as u32),
                             });
 
-                            // For very long waits, check every minute if cooldown changed
-                            let mut remaining_wait = wait_time;
-                            while remaining_wait > 60 {
-                                tokio::time::sleep(Duration::from_secs(60)).await;
-                                remaining_wait = remaining_wait.saturating_sub(60);
+                            // For very long waits, check every minute if we can place earlier
+                            let mut total_waited = 0u64;
+                            while total_waited < wait_time {
+                                let wait_chunk = std::cmp::min(60, wait_time - total_waited);
+                                tokio::time::sleep(Duration::from_secs(wait_chunk)).await;
+                                total_waited += wait_chunk;
 
+                                // Try to get fresh user info to see if cooldown changed
+                                match api_client.get_profile().await {
+                                    Ok(profile_response) => {
+                                        user_info = Some(profile_response.user_infos);
+
+                                        // Check if we can place now (buffer available or timers expired)
+                                        if let Some(ref fresh_info) = user_info {
+                                            let fresh_wait =
+                                                calculate_cooldown_wait_time(fresh_info);
+                                            if fresh_wait == 0 {
+                                                // We can place now! Break out of waiting loop
+                                                let display_pixels_placed = pixels_placed_for_item
+                                                    + pixels_already_correct_at_start;
+                                                let _ = tx.send(QueueUpdate::ItemProgress {
+                                                    item_index: original_index,
+                                                    art_name: queue_item.art.name.clone(),
+                                                    pixels_placed: display_pixels_placed,
+                                                    total_pixels: total_meaningful_pixels,
+                                                    position: (abs_x, abs_y),
+                                                    cooldown_remaining: None,
+                                                });
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    Err(_) => {
+                                        // Profile fetch failed, continue waiting
+                                    }
+                                }
+
+                                // Send progress update with remaining time
+                                let remaining_wait = wait_time - total_waited;
                                 let display_pixels_placed =
                                     pixels_placed_for_item + pixels_already_correct_at_start;
                                 let _ = tx.send(QueueUpdate::ItemProgress {
@@ -487,11 +520,6 @@ impl App {
                                     position: (abs_x, abs_y),
                                     cooldown_remaining: Some(remaining_wait as u32),
                                 });
-                            }
-
-                            // Wait the remaining time (less than 1 minute)
-                            if remaining_wait > 0 {
-                                tokio::time::sleep(Duration::from_secs(remaining_wait)).await;
                             }
                         } else if wait_time > 0 {
                             // Short cooldown - wait normally
@@ -1098,10 +1126,54 @@ impl App {
         if std::path::Path::new("queue.json").exists() {
             let queue_data = std::fs::read_to_string("queue.json")?;
             self.art_queue = serde_json::from_str(&queue_data)?;
-            self.status_message =
-                format!("Loaded {} items from saved queue.", self.art_queue.len());
+
+            let pending_count = self
+                .art_queue
+                .iter()
+                .filter(|item| item.status == QueueStatus::Pending && !item.paused)
+                .count();
+
+            if pending_count > 0 {
+                self.status_message = format!(
+                    "Loaded {} items from saved queue ({} pending). Queue will auto-resume after board loads.",
+                    self.art_queue.len(),
+                    pending_count
+                );
+            } else {
+                self.status_message =
+                    format!("Loaded {} items from saved queue.", self.art_queue.len());
+            }
         }
         Ok(())
+    }
+
+    /// Check if queue should auto-resume and start it if conditions are met
+    pub fn check_auto_resume_queue(&mut self) {
+        // Only auto-resume if:
+        // 1. Queue is not already processing
+        // 2. We have pending items
+        // 3. We have valid tokens
+        // 4. Board has been fetched (so we have colors for filtering)
+        if !self.queue_processing
+            && !self.art_queue.is_empty()
+            && self.api_client.get_auth_cookie_preview().is_some()
+            && self.initial_board_fetched
+            && !self.colors.is_empty()
+        {
+            let pending_count = self
+                .art_queue
+                .iter()
+                .filter(|item| item.status == QueueStatus::Pending && !item.paused)
+                .count();
+
+            if pending_count > 0 {
+                self.add_status_message(format!(
+                    "Auto-resuming queue processing: {} pending items found.",
+                    pending_count
+                ));
+                self.trigger_queue_processing();
+            }
+        }
     }
 }
 
