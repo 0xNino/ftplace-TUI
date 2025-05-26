@@ -190,6 +190,12 @@ impl App {
                     cooldown_remaining: None,
                 });
 
+                // Log API call (note: this is in async context, so we can't add to app status messages directly)
+                eprintln!(
+                    "🎨 POST /api/set (place pixel at {},{} color {})",
+                    abs_x, abs_y, art_pixel.color
+                );
+
                 match api_client.place_pixel(abs_x, abs_y, art_pixel.color).await {
                     Ok(response) => {
                         pixels_placed += 1;
@@ -298,6 +304,12 @@ impl App {
                     tokio::time::sleep(Duration::from_secs(u_info.pixel_timer as u64)).await;
                 }
             }
+
+            // Add API call log to status messages
+            self.add_status_message(format!(
+                "🎨 POST /api/set (place pixel at {},{} color {})",
+                abs_x, abs_y, art_pixel.color
+            ));
 
             match self
                 .api_client

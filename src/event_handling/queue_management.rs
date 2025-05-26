@@ -289,7 +289,15 @@ impl App {
         let base_url = self.api_client.get_base_url();
         let access_token = self.api_client.get_access_token_clone();
         let refresh_token = self.api_client.get_refresh_token_clone();
-        let board_state = self.board.clone(); // Clone board state for pixel checking
+
+        // Create or get shared reference to board state that can be updated
+        let board_state = if let Some(existing_shared_board) = &self.shared_board_state {
+            existing_shared_board.clone()
+        } else {
+            let new_shared_board = std::sync::Arc::new(std::sync::RwLock::new(self.board.clone()));
+            self.shared_board_state = Some(new_shared_board.clone());
+            new_shared_board
+        };
         let queue_items: Vec<_> = self
             .art_queue
             .iter()
@@ -381,36 +389,42 @@ impl App {
                 let total_meaningful_pixels = meaningful_pixels.len();
 
                 // Count pixels already correct at start
-                let pixels_already_correct_at_start = meaningful_pixels
-                    .iter()
-                    .filter(|art_pixel| {
-                        let abs_x = queue_item.art.board_x + art_pixel.x;
-                        let abs_y = queue_item.art.board_y + art_pixel.y;
-                        Self::is_pixel_already_correct_static(
-                            &board_state,
-                            abs_x,
-                            abs_y,
-                            art_pixel.color,
-                        )
-                    })
-                    .count();
+                let pixels_already_correct_at_start = {
+                    let board_lock = board_state.read().unwrap();
+                    meaningful_pixels
+                        .iter()
+                        .filter(|art_pixel| {
+                            let abs_x = queue_item.art.board_x + art_pixel.x;
+                            let abs_y = queue_item.art.board_y + art_pixel.y;
+                            Self::is_pixel_already_correct_static(
+                                &board_lock,
+                                abs_x,
+                                abs_y,
+                                art_pixel.color,
+                            )
+                        })
+                        .count()
+                };
 
-                // Filter pixels that need to be placed
-                let pixels_to_place: Vec<_> = meaningful_pixels
-                    .into_iter()
-                    .enumerate()
-                    .filter(|(_, art_pixel)| {
-                        let abs_x = queue_item.art.board_x + art_pixel.x;
-                        let abs_y = queue_item.art.board_y + art_pixel.y;
-                        // Only include pixels that need to be changed
-                        !Self::is_pixel_already_correct_static(
-                            &board_state,
-                            abs_x,
-                            abs_y,
-                            art_pixel.color,
-                        )
-                    })
-                    .collect();
+                // Filter pixels that need to be placed (check against current board state)
+                let pixels_to_place: Vec<_> = {
+                    let board_lock = board_state.read().unwrap();
+                    meaningful_pixels
+                        .into_iter()
+                        .enumerate()
+                        .filter(|(_, art_pixel)| {
+                            let abs_x = queue_item.art.board_x + art_pixel.x;
+                            let abs_y = queue_item.art.board_y + art_pixel.y;
+                            // Only include pixels that need to be changed
+                            !Self::is_pixel_already_correct_static(
+                                &board_lock,
+                                abs_x,
+                                abs_y,
+                                art_pixel.color,
+                            )
+                        })
+                        .collect()
+                };
 
                 if pixels_to_place.is_empty() {
                     // Send skip update - all pixels already correct
@@ -505,6 +519,12 @@ impl App {
 
                     // Attempt to place the pixel (no retries for cooldown errors)
                     loop {
+                        // Log API call (note: this is in async context, so we can't add to app status messages directly)
+                        eprintln!(
+                            "🎨 POST /api/set (place pixel at {},{} color {})",
+                            abs_x, abs_y, art_pixel.color
+                        );
+
                         match api_client.place_pixel(abs_x, abs_y, art_pixel.color).await {
                             Ok(response) => {
                                 pixels_placed_for_item += 1;
@@ -1009,6 +1029,12 @@ impl App {
                     tokio::time::sleep(Duration::from_secs(u_info.pixel_timer as u64)).await;
                 }
             }
+
+            // Add API call log to status messages
+            self.add_status_message(format!(
+                "🎨 POST /api/set (place pixel at {},{} color {})",
+                abs_x, abs_y, art_pixel.color
+            ));
 
             // Place the pixel
             match self

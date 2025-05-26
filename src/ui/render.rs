@@ -386,20 +386,47 @@ fn render_queue_overlay(app: &App, frame: &mut Frame, inner_board_area: &Rect) {
 fn render_status_area(app: &App, frame: &mut Frame, area: Rect) {
     // Build multi-line status text
     let mut status_lines = Vec::new();
+    let max_lines = (area.height.saturating_sub(2)) as usize; // Account for borders
 
-    // Add recent status messages first (newest first, limit to 2 for space)
-    for (message, _timestamp) in app.status_messages.iter().rev().take(2) {
-        status_lines.push(format!("• {}", message));
+    // Show buffer/timer status as the first line if we have user info
+    if let Some(user_info) = &app.user_info {
+        let available_pixels = if let Some(timers) = &user_info.timers {
+            user_info.pixel_buffer - timers.len() as i32
+        } else {
+            user_info.pixel_buffer
+        };
+
+        // If we have active timers, show the timer line instead of buffer
+        if !app.cooldown_status.is_empty() && app.cooldown_status != "Ready to place pixels" {
+            status_lines.push(format!("🕐 {}", app.cooldown_status));
+        } else {
+            // Only show buffer line if no active timers
+            status_lines.push(format!("Buffer: {} pixels available", available_pixels));
+        }
     }
 
-    // Add cooldown status if available (always show this prominently)
-    if !app.cooldown_status.is_empty() {
-        status_lines.push(format!("🕐 {}", app.cooldown_status));
+    // Add recent status messages (newest first, limit to remaining space)
+    let remaining_lines = max_lines.saturating_sub(status_lines.len());
+    if remaining_lines > 0 {
+        for (message, _timestamp) in app.status_messages.iter().rev().take(remaining_lines) {
+            // Truncate long messages to prevent overflow
+            let truncated_message = if message.len() > 80 {
+                format!("{}...", &message[..77])
+            } else {
+                message.clone()
+            };
+            status_lines.push(format!("• {}", truncated_message));
+        }
     }
 
-    // If no messages, show the main status
-    if status_lines.is_empty() || app.status_messages.is_empty() {
-        status_lines.push(app.status_message.clone());
+    // If no messages and no buffer info, show the main status
+    if status_lines.is_empty() {
+        let truncated_status = if app.status_message.len() > 80 {
+            format!("{}...", &app.status_message[..77])
+        } else {
+            app.status_message.clone()
+        };
+        status_lines.push(truncated_status);
     }
 
     let status_text = status_lines.join("\n");

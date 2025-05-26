@@ -30,6 +30,9 @@ impl App {
         let refresh_token = self.api_client.get_refresh_token_clone();
         let _colors = self.colors.clone();
 
+        // Add API call log to status messages
+        self.add_status_message("📡 GET /api/get (board data)".to_string());
+
         // Spawn async task for board fetching
         tokio::spawn(async move {
             let mut api_client =
@@ -56,6 +59,13 @@ impl App {
             BoardFetchResult::Success(board_response) => {
                 self.board = board_response.board;
                 self.colors = board_response.colors;
+
+                // Update shared board state if it exists (for queue processing)
+                if let Some(shared_board) = &self.shared_board_state {
+                    if let Ok(mut board_lock) = shared_board.write() {
+                        *board_lock = self.board.clone();
+                    }
+                }
 
                 // Set status message directly without adding to history to avoid overriding other logs
                 self.status_message = format!(
@@ -106,10 +116,20 @@ impl App {
             self.status_message = "Fetching board data...".to_string();
         }
 
+        // Add API call log to status messages
+        self.add_status_message("📡 GET /api/get (board data)".to_string());
+
         match self.api_client.get_board().await {
             Ok(board_response) => {
                 self.board = board_response.board;
                 self.colors = board_response.colors;
+
+                // Update shared board state if it exists (for queue processing)
+                if let Some(shared_board) = &self.shared_board_state {
+                    if let Ok(mut board_lock) = shared_board.write() {
+                        *board_lock = self.board.clone();
+                    }
+                }
 
                 let load_time = self
                     .board_load_start

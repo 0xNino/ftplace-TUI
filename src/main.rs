@@ -116,6 +116,7 @@ impl App {
             queue_paused: false,
             queue_blink_state: false,
             last_blink_time: None,
+            shared_board_state: None,
         };
 
         // Load saved queue

@@ -145,7 +145,7 @@ impl App {
             };
 
             if available_pixels > 0 {
-                self.cooldown_status = format!("Buffer: {} pixels available", available_pixels);
+                self.cooldown_status = "Ready to place pixels".to_string();
             } else if let Some(timers) = &user_info.timers {
                 if !timers.is_empty() {
                     let current_time_ms = chrono::Utc::now().timestamp_millis();
@@ -156,12 +156,42 @@ impl App {
                         let remaining_ms = timer_ms - current_time_ms;
                         if remaining_ms > 0 {
                             let remaining_secs = (remaining_ms as f64 / 1000.0).ceil() as u64;
+
+                            // Create a loading bar for each timer
+                            let total_cooldown_secs = user_info.pixel_timer as u64 / 1000;
+                            let progress = if total_cooldown_secs > 0 {
+                                ((total_cooldown_secs - remaining_secs) as f64
+                                    / total_cooldown_secs as f64)
+                                    .min(1.0)
+                                    .max(0.0)
+                            } else {
+                                0.0
+                            };
+
+                            let bar_width = 8;
+                            let filled_width = (progress * bar_width as f64) as usize;
+                            let empty_width = bar_width - filled_width;
+
+                            let bar =
+                                format!("{}{}", "█".repeat(filled_width), "░".repeat(empty_width));
+
                             if remaining_secs > 60 {
                                 let minutes = remaining_secs / 60;
                                 let seconds = remaining_secs % 60;
-                                active_timers.push(format!("T{}:{}m{}s", i + 1, minutes, seconds));
+                                active_timers.push(format!(
+                                    "T{}[{}]{}m{}s",
+                                    i + 1,
+                                    bar,
+                                    minutes,
+                                    seconds
+                                ));
                             } else {
-                                active_timers.push(format!("T{}:{}s", i + 1, remaining_secs));
+                                active_timers.push(format!(
+                                    "T{}[{}]{}s",
+                                    i + 1,
+                                    bar,
+                                    remaining_secs
+                                ));
                             }
 
                             // Track the earliest timer for next pixel available

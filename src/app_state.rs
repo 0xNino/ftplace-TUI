@@ -101,6 +101,10 @@ pub struct App {
     pub queue_paused: bool,           // Whether queue processing is paused
     pub queue_blink_state: bool,      // For blinking preview effect
     pub last_blink_time: Option<Instant>, // Last time blink state changed
+
+    // Shared board state for queue processing
+    pub shared_board_state:
+        Option<std::sync::Arc<std::sync::RwLock<Vec<Vec<Option<PixelNetwork>>>>>>,
 }
 
 #[derive(Debug)]

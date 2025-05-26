@@ -53,6 +53,9 @@ impl App {
 
         self.status_message = "Fetching profile data...".to_string();
 
+        // Add API call log to status messages
+        self.add_status_message("👤 GET /api/profile".to_string());
+
         // Spawn async task for profile fetching
         tokio::spawn(async move {
             let mut api_client =
@@ -87,6 +90,10 @@ impl App {
             return;
         }
         self.status_message = "Fetching profile data...".to_string();
+
+        // Add API call log to status messages
+        self.add_status_message("👤 GET /api/profile".to_string());
+
         match self.api_client.get_profile().await {
             Ok(profile_response) => {
                 let info = profile_response.user_infos;
