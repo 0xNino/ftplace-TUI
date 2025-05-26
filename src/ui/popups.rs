@@ -18,6 +18,7 @@ pub fn render_help_popup(_app: &App, frame: &mut Frame) {
         Line::from(" r: Refresh board data"),
         Line::from(" p: Fetch profile data"),
         Line::from(" i: Show user profile panel"),
+        Line::from(" h: Show status log history"),
         Line::from(" w: Work queue management"),
         Line::from(" Arrows: Scroll board viewport"),
         Line::from(""),
@@ -334,4 +335,71 @@ pub fn render_profile_popup(app: &App, frame: &mut Frame) {
 
     frame.render_widget(Clear, popup_area);
     frame.render_widget(profile_paragraph, popup_area);
+}
+
+pub fn render_status_log_popup(app: &App, frame: &mut Frame) {
+    let popup_area = centered_rect(80, 70, frame.size());
+
+    let mut log_lines = vec![
+        Line::from(Span::styled(
+            "--- Status Log History ---",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )),
+        Line::from(""),
+    ];
+
+    if app.status_messages.is_empty() {
+        log_lines.push(Line::from(Span::styled(
+            "No status messages available.",
+            Style::default().fg(Color::Gray),
+        )));
+    } else {
+        // Show messages in reverse chronological order (newest first)
+        // Use a fixed reference time to avoid "0 seconds ago" issues when popup is reopened
+        let reference_time = std::time::Instant::now();
+        for (message, timestamp) in app.status_messages.iter().rev() {
+            // Format timestamp
+            let elapsed = reference_time.duration_since(*timestamp);
+
+            let time_str = if elapsed.as_secs() < 60 {
+                format!("{}s ago", elapsed.as_secs())
+            } else if elapsed.as_secs() < 3600 {
+                format!("{}m ago", elapsed.as_secs() / 60)
+            } else {
+                format!("{}h ago", elapsed.as_secs() / 3600)
+            };
+
+            // Create a line with timestamp and message
+            log_lines.push(Line::from(vec![
+                Span::styled(
+                    format!("[{}] ", time_str),
+                    Style::default()
+                        .fg(Color::Gray)
+                        .add_modifier(Modifier::ITALIC),
+                ),
+                Span::styled(message, Style::default().fg(Color::White)),
+            ]));
+        }
+    }
+
+    log_lines.push(Line::from(""));
+    log_lines.push(Line::from(Span::styled(
+        "Press Esc, q, or h to close",
+        Style::default()
+            .fg(Color::Gray)
+            .add_modifier(Modifier::ITALIC),
+    )));
+
+    let log_paragraph = Paragraph::new(log_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Status Log History (Press Esc, q, or h to close)"),
+        )
+        .wrap(Wrap { trim: false });
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(log_paragraph, popup_area);
 }

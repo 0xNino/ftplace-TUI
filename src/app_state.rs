@@ -19,6 +19,7 @@ pub enum InputMode {
     ArtQueue,               // New mode for managing art placement queue
     ShowHelp,               // New mode for displaying available commands
     ShowProfile,            // New mode for displaying user profile
+    ShowStatusLog,          // New mode for displaying status message history
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -139,6 +140,9 @@ pub enum PlacementUpdate {
         pixels_placed: usize,
         total_pixels: usize,
     },
+    ApiCall {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -191,6 +195,9 @@ pub enum QueueUpdate {
     QueueResumed {
         item_index: usize,
         art_name: String,
+    },
+    ApiCall {
+        message: String,
     },
 }
 

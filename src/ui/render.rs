@@ -4,7 +4,7 @@ use crate::ui::art_management::{render_art_queue_ui, render_art_selection_ui};
 use crate::ui::helpers::{
     get_current_board_color_ui, get_ratatui_color, is_pixel_already_correct_ui,
 };
-use crate::ui::popups::{render_help_popup, render_profile_popup};
+use crate::ui::popups::{render_help_popup, render_profile_popup, render_status_log_popup};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 
@@ -57,13 +57,41 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
                 InputMode::ArtEditorNewArtName => "New Pixel Art Name (Editing):",
                 _ => "Input:", // Should not happen if logic is correct
             };
-            let input_widget = Paragraph::new(app.input_buffer.as_str())
+
+            // For token inputs, show beginning and end for better visibility
+            let display_text = match app.input_mode {
+                InputMode::EnterAccessToken | InputMode::EnterRefreshToken => {
+                    let buffer = &app.input_buffer;
+                    if buffer.len() > 50 {
+                        // Show first 20 and last 20 characters with "..." in between
+                        let start = &buffer[..20];
+                        let end = &buffer[buffer.len().saturating_sub(20)..];
+                        format!("{}...{} ({})", start, end, buffer.len())
+                    } else {
+                        buffer.clone()
+                    }
+                }
+                _ => app.input_buffer.clone(),
+            };
+
+            let input_widget = Paragraph::new(display_text.as_str())
                 .block(Block::default().borders(Borders::ALL).title(title));
             frame.render_widget(input_widget, input_area_rect);
-            frame.set_cursor(
-                input_area_rect.x + app.input_buffer.chars().count() as u16 + 1,
-                input_area_rect.y + 1,
-            );
+
+            // For cursor positioning, use fixed position for long tokens to avoid char counting
+            let cursor_pos = match app.input_mode {
+                InputMode::EnterAccessToken | InputMode::EnterRefreshToken => {
+                    if app.input_buffer.len() > 50 {
+                        // Fixed cursor position for long tokens - avoid expensive operations
+                        45 // Position after "start...end (length)"
+                    } else {
+                        app.input_buffer.len() as u16 // Use byte length for short tokens
+                    }
+                }
+                _ => app.input_buffer.len() as u16, // Use byte length instead of char count
+            };
+
+            frame.set_cursor(input_area_rect.x + cursor_pos + 1, input_area_rect.y + 1);
         }
         InputMode::ArtSelection => {
             render_art_selection_ui(app, frame, input_area_rect);
@@ -114,6 +142,11 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
     // If ShowProfile mode is active, render the profile popup on top of everything else
     if app.input_mode == InputMode::ShowProfile {
         render_profile_popup(app, frame);
+    }
+
+    // If ShowStatusLog mode is active, render the status log popup on top of everything else
+    if app.input_mode == InputMode::ShowStatusLog {
+        render_status_log_popup(app, frame);
     }
 }
 

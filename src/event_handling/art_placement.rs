@@ -41,10 +41,10 @@ impl App {
                     .map(|start| start.elapsed().as_secs())
                     .unwrap_or(0);
 
-                self.status_message = format!(
+                self.add_status_message(format!(
                     "Completed placing '{}': {}/{} pixels in {}s. Refreshing board...",
                     art_name, pixels_placed, total_pixels, placement_time
-                );
+                ));
 
                 // Reset placement state
                 self.placement_in_progress = false;
@@ -61,13 +61,13 @@ impl App {
                 pixel_index,
                 total_pixels,
             } => {
-                self.status_message = format!(
+                self.add_status_message(format!(
                     "Error placing '{}' at pixel {}/{}: {}. Press 'r' to refresh board.",
                     art_name,
                     pixel_index + 1,
                     total_pixels,
                     error_msg
-                );
+                ));
 
                 // Reset placement state
                 self.placement_in_progress = false;
@@ -80,16 +80,19 @@ impl App {
                 pixels_placed,
                 total_pixels,
             } => {
-                self.status_message = format!(
+                self.add_status_message(format!(
                     "Cancelled placing '{}': {}/{} pixels placed. Press 'r' to refresh board.",
                     art_name, pixels_placed, total_pixels
-                );
+                ));
 
                 // Reset placement state
                 self.placement_in_progress = false;
                 self.placement_start = None;
                 self.placement_receiver = None;
                 self.placement_cancel_requested = false;
+            }
+            PlacementUpdate::ApiCall { message } => {
+                self.add_status_message(message);
             }
         }
     }
@@ -190,11 +193,13 @@ impl App {
                     cooldown_remaining: None,
                 });
 
-                // Log API call (note: this is in async context, so we can't add to app status messages directly)
-                eprintln!(
-                    "🎨 POST /api/set (place pixel at {},{} color {})",
-                    abs_x, abs_y, art_pixel.color
-                );
+                // Send API call log to main thread
+                let _ = tx.send(PlacementUpdate::ApiCall {
+                    message: format!(
+                        "🎨 POST /api/set (place pixel at {},{} color {})",
+                        abs_x, abs_y, art_pixel.color
+                    ),
+                });
 
                 match api_client.place_pixel(abs_x, abs_y, art_pixel.color).await {
                     Ok(response) => {

@@ -1,7 +1,7 @@
 ---
 description: 
 globs: 
-alwaysApply: false
+alwaysApply: true
 ---
 # ftplace-TUI Project Guide
 
@@ -52,7 +52,7 @@ This is a Terminal User Interface (TUI) application for automating pixel placeme
 
 ## Core Architecture
 
-### API Client ([api_client.rs](mdc:ftplace-TUI/ftplace-TUI/ftplace-TUI/ftplace-TUI/src/api_client.rs))
+### API Client ([api_client.rs](mdc:ftplace-TUI/ftplace-TUI/ftplace-TUI/ftplace-TUI/ftplace-TUI/src/api_client.rs))
 - Handles authentication via session cookies (JWT tokens)
 - Implements three main endpoints:
   - `GET /api/get` - Fetch board state and color palette

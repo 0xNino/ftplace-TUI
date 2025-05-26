@@ -126,8 +126,8 @@ impl App {
         self.status_messages
             .push_back((message.clone(), Instant::now()));
 
-        // Keep only last 5 messages
-        while self.status_messages.len() > 5 {
+        // Keep only last 100 messages (increased from 5)
+        while self.status_messages.len() > 100 {
             self.status_messages.pop_front();
         }
 
@@ -239,9 +239,9 @@ impl App {
         }
     }
 
-    /// Clean up old status messages (older than 30 seconds)
+    /// Clean up old status messages (older than 10 minutes)
     pub fn cleanup_old_status_messages(&mut self) {
-        let cutoff = Instant::now() - Duration::from_secs(30);
+        let cutoff = Instant::now() - Duration::from_secs(600); // 10 minutes instead of 30 seconds
         while let Some((_, timestamp)) = self.status_messages.front() {
             if *timestamp < cutoff {
                 self.status_messages.pop_front();

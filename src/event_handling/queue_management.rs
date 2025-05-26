@@ -14,12 +14,12 @@ impl App {
                 art_name,
                 total_items,
             } => {
-                self.status_message = format!(
+                self.add_status_message(format!(
                     "Queue processing: Starting item {}/{} - '{}'",
                     item_index + 1,
                     total_items,
                     art_name
-                );
+                ));
             }
             QueueUpdate::ItemProgress {
                 item_index,
@@ -82,13 +82,13 @@ impl App {
                     item.pixels_total = total_pixels; // Update total to reflect actual pixels that needed placing
                 }
 
-                self.status_message = format!(
+                self.add_status_message(format!(
                     "Queue item {}: '{}' completed - {}/{} pixels placed",
                     item_index + 1,
                     art_name,
                     pixels_placed,
                     total_pixels
-                );
+                ));
             }
             QueueUpdate::ItemFailed {
                 item_index,
@@ -100,12 +100,12 @@ impl App {
                     item.status = QueueStatus::Failed;
                 }
 
-                self.status_message = format!(
+                self.add_status_message(format!(
                     "Queue item {}: '{}' failed - {}",
                     item_index + 1,
                     art_name,
                     error_msg
-                );
+                ));
             }
             QueueUpdate::ItemSkipped {
                 item_index,
@@ -117,24 +117,24 @@ impl App {
                     item.status = QueueStatus::Skipped;
                 }
 
-                self.status_message = format!(
+                self.add_status_message(format!(
                     "Queue item {}: '{}' skipped - {}",
                     item_index + 1,
                     art_name,
                     reason
-                );
+                ));
             }
             QueueUpdate::QueueCompleted {
                 total_items_processed,
                 total_pixels_placed,
                 duration_secs,
             } => {
-                self.status_message = format!(
+                self.add_status_message(format!(
 					"Queue processing complete! {} items processed, {} pixels placed in {}s. Refreshing board...",
 					total_items_processed,
 					total_pixels_placed,
 					duration_secs
-				);
+				));
 
                 // Reset queue processing state
                 self.queue_processing = false;
@@ -148,11 +148,11 @@ impl App {
                 items_processed,
                 total_pixels_placed,
             } => {
-                self.status_message = format!(
+                self.add_status_message(format!(
 					"Queue processing cancelled: {} items processed, {} pixels placed. Press 'r' to refresh board.",
 					items_processed,
 					total_pixels_placed
-				);
+				));
 
                 // Reset queue processing state
                 self.queue_processing = false;
@@ -166,21 +166,27 @@ impl App {
                 total_pixels,
             } => {
                 self.queue_paused = true;
-                self.status_message = format!(
+                self.add_status_message(format!(
                     "Queue paused at item {}: '{}' - {}/{} pixels placed. Press 'space' to resume.",
                     item_index + 1,
                     art_name,
                     pixels_placed,
                     total_pixels
-                );
+                ));
             }
             QueueUpdate::QueueResumed {
                 item_index,
                 art_name,
             } => {
                 self.queue_paused = false;
-                self.status_message =
-                    format!("Queue resumed at item {}: '{}'", item_index + 1, art_name);
+                self.add_status_message(format!(
+                    "Queue resumed at item {}: '{}'",
+                    item_index + 1,
+                    art_name
+                ));
+            }
+            QueueUpdate::ApiCall { message } => {
+                self.add_status_message(message);
             }
         }
     }
@@ -519,11 +525,13 @@ impl App {
 
                     // Attempt to place the pixel (no retries for cooldown errors)
                     loop {
-                        // Log API call (note: this is in async context, so we can't add to app status messages directly)
-                        eprintln!(
-                            "🎨 POST /api/set (place pixel at {},{} color {})",
-                            abs_x, abs_y, art_pixel.color
-                        );
+                        // Send API call log to main thread
+                        let _ = tx.send(QueueUpdate::ApiCall {
+                            message: format!(
+                                "🎨 POST /api/set (place pixel at {},{} color {})",
+                                abs_x, abs_y, art_pixel.color
+                            ),
+                        });
 
                         match api_client.place_pixel(abs_x, abs_y, art_pixel.color).await {
                             Ok(response) => {

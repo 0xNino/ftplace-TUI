@@ -50,7 +50,7 @@ impl App {
         }
 
         let mut should_refresh_board = false;
-        if self.input_mode == InputMode::None
+        if (self.input_mode == InputMode::None || self.input_mode == InputMode::ShowStatusLog)
             && self.initial_board_fetched
             && self.api_client.get_auth_cookie_preview().is_some()
             && !self.board_loading
@@ -68,7 +68,61 @@ impl App {
         }
 
         // Check for user input first - only process board loading if no input is pending
-        if event::poll(Duration::from_millis(50))? {
+        // Use shorter timeout when status log is open for more responsive updates
+        let poll_timeout = if self.input_mode == InputMode::ShowStatusLog {
+            Duration::from_millis(16) // ~60 FPS updates when status log is open
+        } else {
+            Duration::from_millis(50)
+        };
+
+        // Batch character input for better performance during paste operations
+        let mut char_batch = String::new();
+        let mut last_key_code = None;
+
+        // Collect all pending character inputs
+        while event::poll(Duration::from_millis(0))? {
+            match event::read()? {
+                Event::Key(key_event) => {
+                    if key_event.kind == KeyEventKind::Press {
+                        match key_event.code {
+                            KeyCode::Char(c)
+                                if matches!(
+                                    self.input_mode,
+                                    InputMode::EnterCustomBaseUrlText
+                                        | InputMode::EnterAccessToken
+                                        | InputMode::EnterRefreshToken
+                                        | InputMode::ArtEditorNewArtName
+                                ) =>
+                            {
+                                char_batch.push(c);
+                            }
+                            _ => {
+                                // Process any batched characters first
+                                if !char_batch.is_empty() {
+                                    self.input_buffer.push_str(&char_batch);
+                                    char_batch.clear();
+                                }
+                                // Then process the non-character key
+                                self.handle_key_input(key_event.code).await?;
+                                return Ok(()); // Exit early to render UI
+                            }
+                        }
+                        last_key_code = Some(key_event.code);
+                    }
+                }
+                _ => { /* Other events */ }
+            }
+        }
+
+        // Process any remaining batched characters
+        if !char_batch.is_empty() {
+            self.input_buffer.push_str(&char_batch);
+        }
+
+        // If we only had character input and no other keys, we still processed input
+        if last_key_code.is_some() && char_batch.is_empty() {
+            // All input was processed above
+        } else if event::poll(poll_timeout)? {
             match event::read()? {
                 Event::Key(key_event) => {
                     if key_event.kind == KeyEventKind::Press {
@@ -109,6 +163,9 @@ impl App {
             }
             InputMode::ShowProfile => {
                 self.handle_profile_input(key_code);
+            }
+            InputMode::ShowStatusLog => {
+                self.handle_status_log_input(key_code);
             }
             InputMode::ArtEditorNewArtName => {
                 self.handle_new_art_name_input(key_code);
@@ -379,6 +436,11 @@ impl App {
                     self.status_message =
                         "Showing user profile. Press Esc, q, or i to close.".to_string();
                 }
+                KeyCode::Char('h') => {
+                    self.input_mode = InputMode::ShowStatusLog;
+                    self.status_message =
+                        "Showing status log history. Press Esc, q, or h to close.".to_string();
+                }
                 KeyCode::Char('w') => {
                     // Open work queue management
                     self.input_mode = InputMode::ArtQueue;
@@ -516,6 +578,24 @@ impl App {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('i') => {
                 self.input_mode = InputMode::None;
                 self.status_message = "Profile closed.".to_string();
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_status_log_input(&mut self, key_code: KeyCode) {
+        match key_code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('h') => {
+                self.input_mode = InputMode::None;
+                self.status_message = "Status log closed.".to_string();
+            }
+            KeyCode::Char('r') => {
+                // Allow board refresh while status log is open
+                self.trigger_board_fetch();
+            }
+            KeyCode::Char('p') => {
+                // Allow profile fetch while status log is open
+                self.trigger_profile_fetch();
             }
             _ => {}
         }
