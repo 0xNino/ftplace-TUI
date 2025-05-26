@@ -563,12 +563,42 @@ impl App {
 
                         match api_client.place_pixel(abs_x, abs_y, art_pixel.color).await {
                             Ok(response) => {
+                                // Send success log
+                                let _ = tx.send(QueueUpdate::ApiCall {
+                                    message: format!("🎨 POST /api/set → ✅200"),
+                                });
+
                                 pixels_placed_for_item += 1;
                                 total_pixels_placed += 1;
                                 user_info = Some(response.user_infos);
                                 break; // Successfully placed, move to next pixel
                             }
                             Err(e) => {
+                                // Send error log with status
+                                let status_text = match &e {
+                                    crate::api_client::ApiError::ErrorResponse {
+                                        status, ..
+                                    } => {
+                                        let status_emoji = match status.as_u16() {
+                                            400..=499 => "❌",
+                                            500..=599 => "💥",
+                                            _ => "❓",
+                                        };
+                                        format!("{}{}", status_emoji, status.as_u16())
+                                    }
+                                    crate::api_client::ApiError::Unauthorized => {
+                                        "❌401".to_string()
+                                    }
+                                    crate::api_client::ApiError::TokenRefreshedPleaseRetry => {
+                                        "🔄426".to_string()
+                                    }
+                                    _ => "💥ERR".to_string(),
+                                };
+
+                                let _ = tx.send(QueueUpdate::ApiCall {
+                                    message: format!("🎨 POST /api/set → {}", status_text),
+                                });
+
                                 // Handle different types of errors
                                 match &e {
                                     crate::api_client::ApiError::ErrorResponse {
@@ -1069,10 +1099,7 @@ impl App {
             }
 
             // Add API call log to status messages
-            self.add_status_message(format!(
-                "🎨 POST /api/set (place pixel at {},{} color {})",
-                abs_x, abs_y, art_pixel.color
-            ));
+            self.log_api_call("POST", "/api/set", None);
 
             // Place the pixel
             match self
@@ -1081,10 +1108,27 @@ impl App {
                 .await
             {
                 Ok(response) => {
+                    // Log successful API call
+                    self.log_api_call("POST", "/api/set", Some(200));
+
                     pixels_placed += 1;
                     self.user_info = Some(response.user_infos);
                 }
                 Err(e) => {
+                    // Log API error with status code
+                    match &e {
+                        crate::api_client::ApiError::ErrorResponse { status, .. } => {
+                            self.log_api_call("POST", "/api/set", Some(status.as_u16()));
+                        }
+                        crate::api_client::ApiError::Unauthorized => {
+                            self.log_api_call("POST", "/api/set", Some(401));
+                        }
+                        _ => {
+                            // For network errors or other issues, log without status
+                            self.log_api_call("POST", "/api/set", None);
+                        }
+                    }
+
                     return Err(format!("API error: {:?}", e));
                 }
             }

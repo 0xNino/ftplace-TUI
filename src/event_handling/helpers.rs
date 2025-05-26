@@ -157,41 +157,22 @@ impl App {
                         if remaining_ms > 0 {
                             let remaining_secs = (remaining_ms as f64 / 1000.0).ceil() as u64;
 
-                            // Create a loading bar for each timer
-                            let total_cooldown_secs = user_info.pixel_timer as u64 / 1000;
-                            let progress = if total_cooldown_secs > 0 {
-                                ((total_cooldown_secs - remaining_secs) as f64
-                                    / total_cooldown_secs as f64)
-                                    .min(1.0)
-                                    .max(0.0)
-                            } else {
-                                0.0
-                            };
-
-                            let bar_width = 8;
-                            let filled_width = (progress * bar_width as f64) as usize;
-                            let empty_width = bar_width - filled_width;
-
-                            let bar =
-                                format!("{}{}", "█".repeat(filled_width), "░".repeat(empty_width));
-
+                            // Format timer without progress bar - cleaner display with fixed width
                             if remaining_secs > 60 {
                                 let minutes = remaining_secs / 60;
                                 let seconds = remaining_secs % 60;
-                                active_timers.push(format!(
-                                    "T{}[{}]{}m{}s",
-                                    i + 1,
-                                    bar,
-                                    minutes,
-                                    seconds
-                                ));
+                                if seconds > 0 {
+                                    active_timers.push(format!(
+                                        "T{}:{:2}m{:02}s",
+                                        i + 1,
+                                        minutes,
+                                        seconds
+                                    ));
+                                } else {
+                                    active_timers.push(format!("T{}:{:2}m   ", i + 1, minutes));
+                                }
                             } else {
-                                active_timers.push(format!(
-                                    "T{}[{}]{}s",
-                                    i + 1,
-                                    bar,
-                                    remaining_secs
-                                ));
+                                active_timers.push(format!("T{}:{:2}s   ", i + 1, remaining_secs));
                             }
 
                             // Track the earliest timer for next pixel available
@@ -211,13 +192,17 @@ impl App {
                         let next_pixel_str = if next_remaining_secs > 60 {
                             let minutes = next_remaining_secs / 60;
                             let seconds = next_remaining_secs % 60;
-                            format!("{}m{}s", minutes, seconds)
+                            if seconds > 0 {
+                                format!("{:2}m{:02}s", minutes, seconds)
+                            } else {
+                                format!("{:2}m    ", minutes)
+                            }
                         } else {
-                            format!("{}s", next_remaining_secs)
+                            format!("{:2}s    ", next_remaining_secs)
                         };
 
                         self.cooldown_status = format!(
-                            "Next pixel: {} | All: {}",
+                            "Next pixel: {} | Timers: {}",
                             next_pixel_str,
                             active_timers.join(", ")
                         );
@@ -239,6 +224,88 @@ impl App {
         }
     }
 
+    /// Get formatted timer status for display in headers
+    pub fn get_formatted_timer_status(&self) -> String {
+        if let Some(user_info) = &self.user_info {
+            let available_pixels = if let Some(timers) = &user_info.timers {
+                user_info.pixel_buffer - timers.len() as i32
+            } else {
+                user_info.pixel_buffer
+            };
+
+            if available_pixels > 0 {
+                format!("🟢 {} pixels available", available_pixels)
+            } else if let Some(timers) = &user_info.timers {
+                if !timers.is_empty() {
+                    let current_time_ms = chrono::Utc::now().timestamp_millis();
+                    let mut active_timers = Vec::new();
+                    let mut next_available_ms = i64::MAX;
+
+                    for (i, &timer_ms) in timers.iter().enumerate() {
+                        let remaining_ms = timer_ms - current_time_ms;
+                        if remaining_ms > 0 {
+                            let remaining_secs = (remaining_ms as f64 / 1000.0).ceil() as u64;
+
+                            if remaining_secs > 60 {
+                                let minutes = remaining_secs / 60;
+                                let seconds = remaining_secs % 60;
+                                if seconds > 0 {
+                                    active_timers.push(format!(
+                                        "T{}:{:2}m{:02}s",
+                                        i + 1,
+                                        minutes,
+                                        seconds
+                                    ));
+                                } else {
+                                    active_timers.push(format!("T{}:{:2}m   ", i + 1, minutes));
+                                }
+                            } else {
+                                active_timers.push(format!("T{}:{:2}s   ", i + 1, remaining_secs));
+                            }
+
+                            if timer_ms < next_available_ms {
+                                next_available_ms = timer_ms;
+                            }
+                        }
+                    }
+
+                    if active_timers.is_empty() {
+                        "🟢 Ready to place pixels".to_string()
+                    } else {
+                        let next_remaining_ms = next_available_ms - current_time_ms;
+                        let next_remaining_secs = (next_remaining_ms as f64 / 1000.0).ceil() as u64;
+
+                        let next_pixel_str = if next_remaining_secs > 60 {
+                            let minutes = next_remaining_secs / 60;
+                            let seconds = next_remaining_secs % 60;
+                            if seconds > 0 {
+                                format!("{:2}m{:02}s", minutes, seconds)
+                            } else {
+                                format!("{:2}m    ", minutes)
+                            }
+                        } else {
+                            format!("{:2}s    ", next_remaining_secs)
+                        };
+
+                        format!("🔴 Next: {} | {}", next_pixel_str, active_timers.join(", "))
+                    }
+                } else {
+                    format!(
+                        "🟡 No active timers - Cooldown: {}s",
+                        user_info.pixel_timer / 1000
+                    )
+                }
+            } else {
+                format!(
+                    "🟡 No timers data - Cooldown: {}s",
+                    user_info.pixel_timer / 1000
+                )
+            }
+        } else {
+            "⚪ No user info - use 'p' to fetch profile".to_string()
+        }
+    }
+
     /// Clean up old status messages (older than 10 minutes)
     pub fn cleanup_old_status_messages(&mut self) {
         let cutoff = Instant::now() - Duration::from_secs(600); // 10 minutes instead of 30 seconds
@@ -256,5 +323,29 @@ impl App {
     pub async fn check_and_save_refreshed_tokens(&mut self) {
         // This will be called after API operations that might refresh tokens
         self.save_tokens();
+    }
+
+    /// Log API call with status code
+    pub fn log_api_call(&mut self, method: &str, endpoint: &str, status_code: Option<u16>) {
+        let emoji = match method {
+            "GET" => "📡",
+            "POST" => "🎨",
+            _ => "🔗",
+        };
+
+        let status_text = match status_code {
+            Some(code) => {
+                let status_emoji = match code {
+                    200..=299 => "✅",
+                    400..=499 => "❌",
+                    500..=599 => "💥",
+                    _ => "❓",
+                };
+                format!(" → {} {:3}", status_emoji, code)
+            }
+            None => " → ⏳    ".to_string(), // Request initiated - same width as status codes
+        };
+
+        self.add_status_message(format!("{} {} {}{}", emoji, method, endpoint, status_text));
     }
 }

@@ -436,12 +436,13 @@ fn render_status_area(app: &App, frame: &mut Frame, area: Rect) {
             user_info.pixel_buffer
         };
 
-        // If we have active timers, show the timer line instead of buffer
+        // Use the new formatted timer status instead of the old progress bar format
         if !app.cooldown_status.is_empty() && app.cooldown_status != "Ready to place pixels" {
             status_lines.push(format!("🕐 {}", app.cooldown_status));
+        } else if available_pixels > 0 {
+            status_lines.push(format!("🟢 {} pixels available", available_pixels));
         } else {
-            // Only show buffer line if no active timers
-            status_lines.push(format!("Buffer: {} pixels available", available_pixels));
+            status_lines.push(format!("🔴 No pixels available"));
         }
     }
 

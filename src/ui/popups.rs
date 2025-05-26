@@ -354,6 +354,20 @@ pub fn render_status_log_popup(app: &App, frame: &mut Frame) {
         Line::from(""),
     ];
 
+    // Add timer status as sticky header
+    let timer_status = app.get_formatted_timer_status();
+    log_lines.push(Line::from(Span::styled(
+        format!("⏱️  {}", timer_status),
+        Style::default()
+            .add_modifier(Modifier::BOLD)
+            .fg(Color::Yellow),
+    )));
+    log_lines.push(Line::from(Span::styled(
+        "─".repeat(70), // Separator line
+        Style::default().fg(Color::Gray),
+    )));
+    log_lines.push(Line::from(""));
+
     if app.status_messages.is_empty() {
         log_lines.push(Line::from(Span::styled(
             "No status messages available.",
@@ -364,15 +378,15 @@ pub fn render_status_log_popup(app: &App, frame: &mut Frame) {
         // Use a fixed reference time to avoid "0 seconds ago" issues when popup is reopened
         let reference_time = std::time::Instant::now();
         for (message, timestamp) in app.status_messages.iter().rev() {
-            // Format timestamp
+            // Format timestamp with fixed width to prevent shifting
             let elapsed = reference_time.duration_since(*timestamp);
 
             let time_str = if elapsed.as_secs() < 60 {
-                format!("{}s ago", elapsed.as_secs())
+                format!("{:2}s ago", elapsed.as_secs())
             } else if elapsed.as_secs() < 3600 {
-                format!("{}m ago", elapsed.as_secs() / 60)
+                format!("{:2}m ago", elapsed.as_secs() / 60)
             } else {
-                format!("{}h ago", elapsed.as_secs() / 3600)
+                format!("{:2}h ago", elapsed.as_secs() / 3600)
             };
 
             // Create a line with timestamp and message

@@ -210,10 +210,35 @@ impl App {
 
                 match api_client.place_pixel(abs_x, abs_y, art_pixel.color).await {
                     Ok(response) => {
+                        // Send success log
+                        let _ = tx.send(PlacementUpdate::ApiCall {
+                            message: format!("🎨 POST /api/set → ✅200"),
+                        });
                         pixels_placed += 1;
                         user_info = Some(response.user_infos);
                     }
                     Err(e) => {
+                        // Send error log with status
+                        let status_text = match &e {
+                            crate::api_client::ApiError::ErrorResponse { status, .. } => {
+                                let status_emoji = match status.as_u16() {
+                                    400..=499 => "❌",
+                                    500..=599 => "💥",
+                                    _ => "❓",
+                                };
+                                format!("{}{}", status_emoji, status.as_u16())
+                            }
+                            crate::api_client::ApiError::Unauthorized => "❌401".to_string(),
+                            crate::api_client::ApiError::TokenRefreshedPleaseRetry => {
+                                "🔄426".to_string()
+                            }
+                            _ => "💥ERR".to_string(),
+                        };
+
+                        let _ = tx.send(PlacementUpdate::ApiCall {
+                            message: format!("🎨 POST /api/set → {}", status_text),
+                        });
+
                         // Send error update
                         let error_msg = match e {
                             crate::api_client::ApiError::ErrorResponse {
@@ -318,10 +343,7 @@ impl App {
             }
 
             // Add API call log to status messages
-            self.add_status_message(format!(
-                "🎨 POST /api/set (place pixel at {},{} color {})",
-                abs_x, abs_y, art_pixel.color
-            ));
+            self.log_api_call("POST", "/api/set", None);
 
             match self
                 .api_client
@@ -329,6 +351,9 @@ impl App {
                 .await
             {
                 Ok(response) => {
+                    // Log successful API call
+                    self.log_api_call("POST", "/api/set", Some(200));
+
                     self.status_message = format!(
                         "Pixel {}/{} placed at ({},{}). Next CD: {}s, Buf: {}. User Timers: {}.",
                         index + 1,
@@ -342,6 +367,20 @@ impl App {
                     self.user_info = Some(response.user_infos);
                 }
                 Err(e) => {
+                    // Log API error with status code
+                    match &e {
+                        ApiError::ErrorResponse { status, .. } => {
+                            self.log_api_call("POST", "/api/set", Some(status.as_u16()));
+                        }
+                        ApiError::Unauthorized => {
+                            self.log_api_call("POST", "/api/set", Some(401));
+                        }
+                        _ => {
+                            // For network errors or other issues, log without status
+                            self.log_api_call("POST", "/api/set", None);
+                        }
+                    }
+
                     // Use enhanced error display for API errors
                     let base_message = format!(
                         "Error placing pixel {}/{} at ({},{})",
@@ -367,10 +406,6 @@ impl App {
                         }
                         _ => {}
                     }
-
-                    // Use enhanced error display for all other errors
-                    self.handle_api_error_with_enhanced_display(&base_message, &e)
-                        .await;
 
                     // For rate limiting errors, don't halt placement - let enhanced display handle it
                     if let ApiError::ErrorResponse { status, .. } = &e {
