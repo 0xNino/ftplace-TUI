@@ -2,7 +2,7 @@
 target/
 
 # Specific output files
-pixel_arts/
+patterns/*
 logs/
 queue/
 shares/
@@ -18,7 +18,7 @@ shares/
 # Environment files
 .env 
 
-!pixel_arts/swizerland_map.json
-!pixel_arts/switzerland_flag.json
+!patterns/switzerland_map.json
+!patterns/switzerland_flag.json
 
 .cursor/

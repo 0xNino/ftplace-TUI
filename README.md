@@ -189,7 +189,7 @@ ftplace-TUI/
 │   └── status_messages.json # Persistent status history
 ├── queue/                   # Queue data (planned)
 │   └── queue.json          # Persistent queue state
-├── pixel_arts/             # Saved pixel art files
+├── patterns/               # Saved pixel art files
 │   └── *.json             # Individual art files
 ├── myplace/               # Reference backend code
 └── README.md              # This file

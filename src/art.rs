@@ -291,10 +291,10 @@ pub fn get_available_pixel_arts() -> Vec<PixelArt> {
     // Add default pixel art first
     arts.push(load_default_pixel_art());
 
-    // Load saved pixel arts from pixel_arts directory
-    let pixel_arts_dir = Path::new("pixel_arts");
-    if pixel_arts_dir.exists() && pixel_arts_dir.is_dir() {
-        if let Ok(entries) = fs::read_dir(pixel_arts_dir) {
+    // Load saved pixel arts from patterns directory
+    let patterns_dir = Path::new("patterns");
+    if patterns_dir.exists() && patterns_dir.is_dir() {
+        if let Ok(entries) = fs::read_dir(patterns_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().and_then(|s| s.to_str()) == Some("json") {

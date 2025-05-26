@@ -34,11 +34,11 @@ impl App {
             };
             match serde_json::to_string_pretty(&art_with_name) {
                 Ok(json_data) => {
-                    let dir_path = Path::new("pixel_arts");
+                    let dir_path = Path::new("patterns");
                     if !dir_path.exists() {
                         if let Err(e) = std::fs::create_dir_all(dir_path) {
                             self.status_message =
-                                format!("Error creating directory pixel_arts: {}", e);
+                                format!("Error creating directory patterns: {}", e);
                             return;
                         }
                     }
