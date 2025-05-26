@@ -966,7 +966,8 @@ impl App {
             seen_positions.insert(position);
         }
 
-        meaningful_pixels
+        // Apply border-first ordering
+        order_pixels_border_first(meaningful_pixels)
     }
 
     /// Static helper for filtering meaningful pixels with color filtering
@@ -1007,7 +1008,8 @@ impl App {
             seen_positions.insert(position);
         }
 
-        meaningful_pixels
+        // Apply border-first ordering
+        order_pixels_border_first(meaningful_pixels)
     }
 
     /// Static helper for checking if a pixel is already correct
@@ -1496,4 +1498,62 @@ pub fn should_pause_queue_processing(user_info: &UserInfos) -> (bool, u64) {
     } else {
         (false, wait_time)
     }
+}
+
+/// Order pixels with border-first strategy: borders first, then top-to-bottom fill
+/// This is a standalone function that can be used by both queue_management and art_placement
+pub fn order_pixels_border_first(
+    mut pixels: Vec<crate::art::ArtPixel>,
+) -> Vec<crate::art::ArtPixel> {
+    if pixels.is_empty() {
+        return pixels;
+    }
+
+    // Find the bounding box of all pixels
+    let min_x = pixels.iter().map(|p| p.x).min().unwrap();
+    let max_x = pixels.iter().map(|p| p.x).max().unwrap();
+    let min_y = pixels.iter().map(|p| p.y).min().unwrap();
+    let max_y = pixels.iter().map(|p| p.y).max().unwrap();
+
+    // Create a set of all pixel positions for fast lookup
+    let pixel_positions: std::collections::HashSet<(i32, i32)> =
+        pixels.iter().map(|p| (p.x, p.y)).collect();
+
+    // Separate border pixels from interior pixels
+    let mut border_pixels = Vec::new();
+    let mut interior_pixels = Vec::new();
+
+    for pixel in pixels.drain(..) {
+        let x = pixel.x;
+        let y = pixel.y;
+
+        // A pixel is on the border if:
+        // 1. It's on the edge of the bounding box, OR
+        // 2. It has at least one adjacent position (4-directional) that doesn't contain a pixel
+        let is_border = x == min_x
+            || x == max_x
+            || y == min_y
+            || y == max_y
+            || !pixel_positions.contains(&(x - 1, y))
+            || !pixel_positions.contains(&(x + 1, y))
+            || !pixel_positions.contains(&(x, y - 1))
+            || !pixel_positions.contains(&(x, y + 1));
+
+        if is_border {
+            border_pixels.push(pixel);
+        } else {
+            interior_pixels.push(pixel);
+        }
+    }
+
+    // Sort border pixels: top-to-bottom, left-to-right
+    border_pixels.sort_by(|a, b| a.y.cmp(&b.y).then_with(|| a.x.cmp(&b.x)));
+
+    // Sort interior pixels: top-to-bottom, left-to-right
+    interior_pixels.sort_by(|a, b| a.y.cmp(&b.y).then_with(|| a.x.cmp(&b.x)));
+
+    // Combine: borders first, then interior
+    let mut result = border_pixels;
+    result.extend(interior_pixels);
+    result
 }

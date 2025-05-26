@@ -458,7 +458,8 @@ impl App {
             seen_positions.insert(position);
         }
 
-        meaningful_pixels
+        // Apply border-first ordering
+        super::queue_management::order_pixels_border_first(meaningful_pixels)
     }
 
     /// Get color IDs that should be considered background/transparent
