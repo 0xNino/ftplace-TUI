@@ -18,4 +18,7 @@ shares/
 # Environment files
 .env 
 
-dev/
+!pixel_arts/swizerland_map.json
+!pixel_arts/switzerland_flag.json
+
+.cursor/

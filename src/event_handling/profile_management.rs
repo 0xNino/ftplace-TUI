@@ -66,10 +66,10 @@ impl App {
         self.profile_receiver = Some(rx);
 
         // Clone API client data needed for the fetch
+        // Get the CURRENT tokens from the main API client (which may have been refreshed)
         let base_url = self.api_client.get_base_url();
         let access_token = self.api_client.get_access_token_clone();
         let refresh_token = self.api_client.get_refresh_token_clone();
-        let _colors = self.colors.clone();
 
         self.status_message = "Fetching profile data...".to_string();
 

@@ -16,6 +16,7 @@ pub enum InputMode {
     ArtEditor,              // New mode for creating/editing pixel art
     ArtEditorNewArtName,    // New mode for entering name when creating new art
     ArtSelection,           // New mode for selecting pixel art to load/place
+    ArtPreview,             // New mode for full-screen art preview
     ArtQueue,               // New mode for managing art placement queue
     ShowHelp,               // New mode for displaying available commands
     ShowProfile,            // New mode for displaying user profile
@@ -97,6 +98,7 @@ pub struct App {
     // Pixel Art Selection State
     pub available_pixel_arts: Vec<PixelArt>, // List of available pixel arts (saved + default)
     pub art_selection_index: usize,          // Current selection in art list
+    pub art_preview_art: Option<PixelArt>,   // Art being previewed in full-screen mode
 
     // Art Queue System
     pub art_queue: Vec<ArtQueueItem>, // Queue of arts to be placed

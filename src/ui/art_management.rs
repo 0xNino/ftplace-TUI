@@ -3,7 +3,7 @@ use crate::ui::helpers::get_ratatui_color;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 
-/// Render the art selection UI with previews
+/// Render the art selection UI (full width, no small preview)
 pub fn render_art_selection_ui(app: &App, frame: &mut Frame, area: Rect) {
     if app.available_pixel_arts.is_empty() {
         let empty_message = Paragraph::new("No pixel arts available").block(
@@ -15,15 +15,7 @@ pub fn render_art_selection_ui(app: &App, frame: &mut Frame, area: Rect) {
         return;
     }
 
-    let selection_layout = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(50), // Art list
-            Constraint::Percentage(50), // Preview
-        ])
-        .split(area);
-
-    // Render art list on the left
+    // Render art list using full width
     let art_items: Vec<ListItem> = app
         .available_pixel_arts
         .iter()
@@ -54,7 +46,7 @@ pub fn render_art_selection_ui(app: &App, frame: &mut Frame, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Select Pixel Art (Enter to load for positioning, Esc to cancel)"),
+                .title("Select Pixel Art (Enter to load, Esc to cancel)"),
         )
         .highlight_style(
             Style::default()
@@ -66,93 +58,7 @@ pub fn render_art_selection_ui(app: &App, frame: &mut Frame, area: Rect) {
     let mut list_state = ListState::default();
     list_state.select(Some(app.art_selection_index));
 
-    frame.render_stateful_widget(art_list, selection_layout[0], &mut list_state);
-
-    // Render preview on the right
-    if let Some(selected_art) = app.available_pixel_arts.get(app.art_selection_index) {
-        render_art_preview(selected_art, app, frame, selection_layout[1]);
-    }
-}
-
-/// Render a preview of a pixel art
-fn render_art_preview(art: &crate::art::PixelArt, app: &App, frame: &mut Frame, area: Rect) {
-    let preview_block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!("Preview: {}", art.name));
-    frame.render_widget(preview_block.clone(), area);
-
-    let inner_area = area.inner(Margin {
-        vertical: 1,
-        horizontal: 1,
-    });
-
-    if art.pattern.is_empty() {
-        let empty_preview = Paragraph::new("(Empty art)").style(Style::default().fg(Color::Gray));
-        frame.render_widget(empty_preview, inner_area);
-        return;
-    }
-
-    // Calculate art bounds
-    let dimensions = crate::art::get_art_dimensions(art);
-    let art_width = dimensions.0 as u16;
-    let art_height = dimensions.1 as u16;
-
-    // Scale preview to fit available space
-    let max_preview_width = inner_area.width;
-    let max_preview_height = inner_area.height * 2; // Since we use half-blocks
-
-    let scale_x = if art_width == 0 {
-        1.0
-    } else {
-        max_preview_width as f32 / art_width as f32
-    };
-    let scale_y = if art_height == 0 {
-        1.0
-    } else {
-        max_preview_height as f32 / art_height as f32
-    };
-    let scale = scale_x.min(scale_y).min(1.0); // Don't scale up, only down
-
-    let preview_width = (art_width as f32 * scale) as u16;
-    let preview_height = ((art_height as f32 * scale) / 2.0) as u16; // Divide by 2 for half-blocks
-
-    // Center the preview
-    let start_x = inner_area.x + (inner_area.width.saturating_sub(preview_width)) / 2;
-    let start_y = inner_area.y + (inner_area.height.saturating_sub(preview_height)) / 2;
-
-    // Render the art preview using half-blocks
-    for screen_y in 0..preview_height {
-        for screen_x in 0..preview_width {
-            let art_pixel_y_top = ((screen_y * 2) as f32 / scale) as i32;
-            let art_pixel_y_bottom = art_pixel_y_top + (1.0 / scale) as i32;
-            let art_pixel_x = (screen_x as f32 / scale) as i32;
-
-            let top_pixel_color = art
-                .pattern
-                .iter()
-                .find(|p| p.x == art_pixel_x && p.y == art_pixel_y_top)
-                .map(|p| get_ratatui_color(app, p.color, Color::DarkGray))
-                .unwrap_or(Color::DarkGray);
-
-            let bottom_pixel_color = art
-                .pattern
-                .iter()
-                .find(|p| p.x == art_pixel_x && p.y == art_pixel_y_bottom)
-                .map(|p| get_ratatui_color(app, p.color, Color::DarkGray))
-                .unwrap_or(Color::DarkGray);
-
-            let cell_char = '▀';
-            let style = Style::default().fg(top_pixel_color).bg(bottom_pixel_color);
-
-            if start_x + screen_x < frame.size().width && start_y + screen_y < frame.size().height {
-                frame
-                    .buffer_mut()
-                    .get_mut(start_x + screen_x, start_y + screen_y)
-                    .set_char(cell_char)
-                    .set_style(style);
-            }
-        }
-    }
+    frame.render_stateful_widget(art_list, area, &mut list_state);
 }
 
 /// Render the art queue management UI
@@ -489,4 +395,300 @@ fn render_share_details(
         .wrap(Wrap { trim: false });
 
     frame.render_widget(details_paragraph, area);
+}
+
+/// Render a full-screen art preview for art selection (always visible)
+pub fn render_art_preview_fullscreen(
+    art: &crate::art::PixelArt,
+    app: &App,
+    frame: &mut Frame,
+    area: Rect,
+) {
+    // Create a popup that takes most of the screen
+    let popup_area = centered_rect(90, 85, area);
+
+    // Clear the background
+    frame.render_widget(
+        Block::default()
+            .style(Style::default().bg(Color::Black))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::White))
+            .title(format!(
+                "Preview: {} (Enter to load, Esc to cancel)",
+                art.name
+            )),
+        popup_area,
+    );
+
+    let inner_area = popup_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+
+    if art.pattern.is_empty() {
+        let empty_preview = Paragraph::new("(Empty art)")
+            .style(Style::default().fg(Color::Gray))
+            .block(Block::default());
+        frame.render_widget(empty_preview, inner_area);
+        return;
+    }
+
+    // Calculate art bounds
+    let dimensions = crate::art::get_art_dimensions(art);
+    let art_width = dimensions.0 as u16;
+    let art_height = dimensions.1 as u16;
+
+    // Scale preview to fit available space, but allow scaling up for small arts
+    let max_preview_width = inner_area.width;
+    let max_preview_height = inner_area.height * 2; // Since we use half-blocks
+
+    let scale_x = if art_width == 0 {
+        1.0
+    } else {
+        max_preview_width as f32 / art_width as f32
+    };
+    let scale_y = if art_height == 0 {
+        1.0
+    } else {
+        max_preview_height as f32 / art_height as f32
+    };
+
+    // For full-screen preview, allow scaling up to a reasonable limit
+    let scale = scale_x.min(scale_y).min(8.0); // Max 8x scaling
+
+    let preview_width = (art_width as f32 * scale) as u16;
+    let preview_height = ((art_height as f32 * scale) / 2.0) as u16; // Divide by 2 for half-blocks
+
+    // First, fill the entire inner area with black background
+    for y in 0..inner_area.height {
+        for x in 0..inner_area.width {
+            if inner_area.x + x < frame.size().width && inner_area.y + y < frame.size().height {
+                frame
+                    .buffer_mut()
+                    .get_mut(inner_area.x + x, inner_area.y + y)
+                    .set_char(' ')
+                    .set_style(Style::default().bg(Color::Black));
+            }
+        }
+    }
+
+    // Center the preview
+    let start_x = inner_area.x + (inner_area.width.saturating_sub(preview_width)) / 2;
+    let start_y = inner_area.y + (inner_area.height.saturating_sub(preview_height)) / 2;
+
+    // Render the art preview using half-blocks
+    for screen_y in 0..preview_height {
+        for screen_x in 0..preview_width {
+            let art_pixel_y_top = ((screen_y * 2) as f32 / scale) as i32;
+            let art_pixel_y_bottom = art_pixel_y_top + (1.0 / scale) as i32;
+            let art_pixel_x = (screen_x as f32 / scale) as i32;
+
+            let top_pixel = art
+                .pattern
+                .iter()
+                .find(|p| p.x == art_pixel_x && p.y == art_pixel_y_top);
+
+            let bottom_pixel = art
+                .pattern
+                .iter()
+                .find(|p| p.x == art_pixel_x && p.y == art_pixel_y_bottom);
+
+            let top_pixel_color = top_pixel
+                .map(|p| get_ratatui_color(app, p.color, Color::Black))
+                .unwrap_or(Color::Black); // Use Black for empty areas
+
+            let bottom_pixel_color = bottom_pixel
+                .map(|p| get_ratatui_color(app, p.color, Color::Black))
+                .unwrap_or(Color::Black); // Use Black for empty areas
+
+            let cell_char = '▀';
+            let style = Style::default().fg(top_pixel_color).bg(bottom_pixel_color);
+
+            if start_x + screen_x < frame.size().width && start_y + screen_y < frame.size().height {
+                frame
+                    .buffer_mut()
+                    .get_mut(start_x + screen_x, start_y + screen_y)
+                    .set_char(cell_char)
+                    .set_style(style);
+            }
+        }
+    }
+
+    // Add info text at the bottom
+    let info_area = Rect {
+        x: popup_area.x + 2,
+        y: popup_area.y + popup_area.height - 3,
+        width: popup_area.width - 4,
+        height: 1,
+    };
+
+    let info_text = format!(
+        "Size: {}x{} pixels | Scale: {:.1}x | Use ↑↓ to browse, Enter to load",
+        art_width, art_height, scale
+    );
+
+    frame.render_widget(
+        Paragraph::new(info_text)
+            .style(Style::default().fg(Color::Cyan))
+            .alignment(Alignment::Center),
+        info_area,
+    );
+}
+
+/// Render a full-screen art preview popup
+pub fn render_art_preview_ui(app: &App, frame: &mut Frame, area: Rect) {
+    if let Some(art) = &app.art_preview_art {
+        // Create a popup that takes most of the screen
+        let popup_area = centered_rect(90, 85, area);
+
+        // Clear the background
+        frame.render_widget(
+            Block::default()
+                .style(Style::default().bg(Color::Black))
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::White))
+                .title(format!(
+                    "Full Preview: {} (Enter to load, Esc to return)",
+                    art.name
+                )),
+            popup_area,
+        );
+
+        let inner_area = popup_area.inner(Margin {
+            vertical: 1,
+            horizontal: 1,
+        });
+
+        if art.pattern.is_empty() {
+            let empty_preview = Paragraph::new("(Empty art)")
+                .style(Style::default().fg(Color::Gray))
+                .block(Block::default());
+            frame.render_widget(empty_preview, inner_area);
+            return;
+        }
+
+        // Calculate art bounds
+        let dimensions = crate::art::get_art_dimensions(art);
+        let art_width = dimensions.0 as u16;
+        let art_height = dimensions.1 as u16;
+
+        // Scale preview to fit available space, but allow scaling up for small arts
+        let max_preview_width = inner_area.width;
+        let max_preview_height = inner_area.height * 2; // Since we use half-blocks
+
+        let scale_x = if art_width == 0 {
+            1.0
+        } else {
+            max_preview_width as f32 / art_width as f32
+        };
+        let scale_y = if art_height == 0 {
+            1.0
+        } else {
+            max_preview_height as f32 / art_height as f32
+        };
+
+        // For full-screen preview, allow scaling up to a reasonable limit
+        let scale = scale_x.min(scale_y).min(8.0); // Max 8x scaling
+
+        let preview_width = (art_width as f32 * scale) as u16;
+        let preview_height = ((art_height as f32 * scale) / 2.0) as u16; // Divide by 2 for half-blocks
+
+        // First, fill the entire inner area with black background
+        for y in 0..inner_area.height {
+            for x in 0..inner_area.width {
+                if inner_area.x + x < frame.size().width && inner_area.y + y < frame.size().height {
+                    frame
+                        .buffer_mut()
+                        .get_mut(inner_area.x + x, inner_area.y + y)
+                        .set_char(' ')
+                        .set_style(Style::default().bg(Color::Black));
+                }
+            }
+        }
+
+        // Center the preview
+        let start_x = inner_area.x + (inner_area.width.saturating_sub(preview_width)) / 2;
+        let start_y = inner_area.y + (inner_area.height.saturating_sub(preview_height)) / 2;
+
+        // Render the art preview using half-blocks
+        for screen_y in 0..preview_height {
+            for screen_x in 0..preview_width {
+                let art_pixel_y_top = ((screen_y * 2) as f32 / scale) as i32;
+                let art_pixel_y_bottom = art_pixel_y_top + (1.0 / scale) as i32;
+                let art_pixel_x = (screen_x as f32 / scale) as i32;
+
+                let top_pixel = art
+                    .pattern
+                    .iter()
+                    .find(|p| p.x == art_pixel_x && p.y == art_pixel_y_top);
+
+                let bottom_pixel = art
+                    .pattern
+                    .iter()
+                    .find(|p| p.x == art_pixel_x && p.y == art_pixel_y_bottom);
+
+                let top_pixel_color = top_pixel
+                    .map(|p| get_ratatui_color(app, p.color, Color::Black))
+                    .unwrap_or(Color::Black); // Use Black for empty areas
+
+                let bottom_pixel_color = bottom_pixel
+                    .map(|p| get_ratatui_color(app, p.color, Color::Black))
+                    .unwrap_or(Color::Black); // Use Black for empty areas
+
+                let cell_char = '▀';
+                let style = Style::default().fg(top_pixel_color).bg(bottom_pixel_color);
+
+                if start_x + screen_x < frame.size().width
+                    && start_y + screen_y < frame.size().height
+                {
+                    frame
+                        .buffer_mut()
+                        .get_mut(start_x + screen_x, start_y + screen_y)
+                        .set_char(cell_char)
+                        .set_style(style);
+                }
+            }
+        }
+
+        // Add info text at the bottom
+        let info_area = Rect {
+            x: popup_area.x + 2,
+            y: popup_area.y + popup_area.height - 3,
+            width: popup_area.width - 4,
+            height: 1,
+        };
+
+        let info_text = format!(
+            "Size: {}x{} pixels | Scale: {:.1}x | Controls: Enter=Load, Esc=Return",
+            art_width, art_height, scale
+        );
+
+        frame.render_widget(
+            Paragraph::new(info_text)
+                .style(Style::default().fg(Color::Cyan))
+                .alignment(Alignment::Center),
+            info_area,
+        );
+    }
+}
+
+/// Helper function to create a centered rectangle
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }

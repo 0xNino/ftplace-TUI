@@ -322,6 +322,9 @@ impl App {
             InputMode::ArtSelection => {
                 self.handle_art_selection_input(key_code);
             }
+            InputMode::ArtPreview => {
+                self.handle_art_preview_input(key_code);
+            }
             InputMode::ArtQueue => {
                 self.handle_queue_input(key_code).await?;
             }
@@ -878,11 +881,72 @@ impl App {
                     );
                 }
             }
+            KeyCode::Char(' ') => {
+                // Show full-screen preview of selected art
+                if let Some(selected_art) = self
+                    .available_pixel_arts
+                    .get(self.art_selection_index)
+                    .cloned()
+                {
+                    self.art_preview_art = Some(selected_art);
+                    self.input_mode = InputMode::ArtPreview;
+                    self.status_message =
+                        "Full-screen art preview. Press Esc to return to selection.".to_string();
+                }
+            }
             KeyCode::Esc => {
                 self.input_mode = InputMode::None;
                 self.status_message = "Art selection cancelled.".to_string();
             }
             KeyCode::Char('q') => self.exit = true,
+            _ => {}
+        }
+    }
+
+    fn handle_art_preview_input(&mut self, key_code: KeyCode) {
+        match key_code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.art_preview_art = None;
+                self.input_mode = InputMode::ArtSelection;
+                self.status_message = "Returned to art selection.".to_string();
+            }
+            KeyCode::Enter => {
+                // Load the previewed art for positioning
+                if let Some(art) = &self.art_preview_art {
+                    let mut art_to_load = art.clone();
+
+                    // Center the art in the current viewport
+                    if let Some((_, _, board_width, board_height)) = self.board_area_bounds {
+                        // Calculate viewport center in board coordinates
+                        let viewport_center_x =
+                            self.board_viewport_x as i32 + (board_width as i32 / 2);
+                        let viewport_center_y =
+                            self.board_viewport_y as i32 + (board_height as i32); // *2 because half-blocks
+
+                        // Get art dimensions to center it properly
+                        let art_dimensions = crate::art::get_art_dimensions(&art_to_load);
+                        let art_center_offset_x = art_dimensions.0 / 2;
+                        let art_center_offset_y = art_dimensions.1 / 2;
+
+                        // Position art so its center aligns with viewport center
+                        art_to_load.board_x = viewport_center_x - art_center_offset_x;
+                        art_to_load.board_y = viewport_center_y - art_center_offset_y;
+                    } else {
+                        // Fallback: center in current viewport using viewport coordinates
+                        art_to_load.board_x = self.board_viewport_x as i32 + 25; // Rough center estimate
+                        art_to_load.board_y = self.board_viewport_y as i32 + 15;
+                    }
+
+                    // Load art for positioning
+                    self.loaded_art = Some(art_to_load.clone());
+                    self.art_preview_art = None;
+                    self.input_mode = InputMode::None;
+                    self.status_message = format!(
+                        "Loaded art: '{}' at ({}, {}). Use arrows to position, Enter to add to queue.",
+                        art_to_load.name, art_to_load.board_x, art_to_load.board_y
+                    );
+                }
+            }
             _ => {}
         }
     }

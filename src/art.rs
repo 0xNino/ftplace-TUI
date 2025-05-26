@@ -51,73 +51,151 @@ fn is_zero(value: &i32) -> bool {
 }
 
 // Function to load a predefined pixel art
-// In the future, this could load from a file (e.g., JSON)
+// Swiss flag as the default pixel art
 pub fn load_default_pixel_art() -> PixelArt {
     PixelArt {
-        name: "Smiley Face".to_string(),
-        width: 4,  // Set appropriate width
-        height: 3, // Set appropriate height
+        name: "Swiss".to_string(),
+        width: 5, // 5x5 Swiss flag
+        height: 5,
         pattern: vec![
-            // Top row outline
+            // White cross pixels (color 1)
+            ArtPixel {
+                x: 2,
+                y: 3,
+                color: 1,
+            },
+            ArtPixel {
+                x: 2,
+                y: 2,
+                color: 1,
+            },
+            ArtPixel {
+                x: 2,
+                y: 1,
+                color: 1,
+            },
+            ArtPixel {
+                x: 1,
+                y: 2,
+                color: 1,
+            },
+            ArtPixel {
+                x: 3,
+                y: 2,
+                color: 1,
+            },
+            // Red background pixels (color 18)
+            ArtPixel {
+                x: 1,
+                y: 4,
+                color: 18,
+            },
+            ArtPixel {
+                x: 2,
+                y: 4,
+                color: 18,
+            },
+            ArtPixel {
+                x: 3,
+                y: 4,
+                color: 18,
+            },
+            ArtPixel {
+                x: 1,
+                y: 3,
+                color: 18,
+            },
+            ArtPixel {
+                x: 0,
+                y: 3,
+                color: 18,
+            },
+            ArtPixel {
+                x: 0,
+                y: 2,
+                color: 18,
+            },
+            ArtPixel {
+                x: 0,
+                y: 1,
+                color: 18,
+            },
             ArtPixel {
                 x: 0,
                 y: 0,
-                color: 2,
-            }, // Black outline
+                color: 18,
+            },
             ArtPixel {
                 x: 1,
                 y: 0,
-                color: 2,
+                color: 18,
             },
             ArtPixel {
                 x: 2,
                 y: 0,
-                color: 2,
+                color: 18,
             },
-            // Middle row - eyes and outline
+            ArtPixel {
+                x: 3,
+                y: 0,
+                color: 18,
+            },
+            ArtPixel {
+                x: 4,
+                y: 0,
+                color: 18,
+            },
+            ArtPixel {
+                x: 4,
+                y: 1,
+                color: 18,
+            },
+            ArtPixel {
+                x: 4,
+                y: 2,
+                color: 18,
+            },
+            ArtPixel {
+                x: 4,
+                y: 3,
+                color: 18,
+            },
+            ArtPixel {
+                x: 4,
+                y: 4,
+                color: 18,
+            },
             ArtPixel {
                 x: 0,
-                y: 1,
-                color: 2,
-            }, // Left outline
+                y: 4,
+                color: 18,
+            },
             ArtPixel {
                 x: 1,
                 y: 1,
-                color: 3,
-            }, // Left eye (yellow)
-            ArtPixel {
-                x: 2,
-                y: 1,
-                color: 3,
-            }, // Right eye (yellow)
+                color: 18,
+            },
             ArtPixel {
                 x: 3,
                 y: 1,
-                color: 2,
-            }, // Right outline
-            // Bottom row - smile and outline
+                color: 18,
+            },
             ArtPixel {
-                x: 0,
-                y: 2,
-                color: 2,
-            }, // Left outline
-            ArtPixel {
-                x: 1,
-                y: 2,
-                color: 3,
-            }, // Smile (yellow)
-            ArtPixel {
-                x: 2,
-                y: 2,
-                color: 2,
-            }, // Right outline
+                x: 3,
+                y: 3,
+                color: 18,
+            },
         ],
         board_x: 10, // Default position on board
         board_y: 5,
-        description: Some("A simple smiley face".to_string()),
+        description: Some("Swiss flag with white cross on red background".to_string()),
         author: Some("ftplace-TUI".to_string()),
         created_at: Some(chrono::Utc::now().to_rfc3339()),
-        tags: Some(vec!["default".to_string(), "smiley".to_string()]),
+        tags: Some(vec![
+            "default".to_string(),
+            "swiss".to_string(),
+            "flag".to_string(),
+        ]),
     }
 }
 

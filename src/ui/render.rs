@@ -1,7 +1,8 @@
 use crate::app_state::{App, InputMode};
 use crate::ui::art_editor::render_art_editor_ui;
 use crate::ui::art_management::{
-    render_art_queue_ui, render_art_selection_ui, render_share_selection_ui,
+    render_art_preview_fullscreen, render_art_preview_ui, render_art_queue_ui,
+    render_art_selection_ui, render_share_selection_ui,
 };
 use crate::ui::helpers::{
     get_current_board_color_ui, get_ratatui_color, is_pixel_already_correct_ui,
@@ -102,6 +103,11 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
         InputMode::ArtSelection => {
             render_art_selection_ui(app, frame, input_area_rect);
         }
+        InputMode::ArtPreview => {
+            // Art preview is rendered as a full-screen popup later,
+            // so we show the art selection UI in the background
+            render_art_selection_ui(app, frame, input_area_rect);
+        }
         InputMode::ArtQueue => {
             render_art_queue_ui(app, frame, input_area_rect);
         }
@@ -131,6 +137,10 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
         InputMode::ArtEditor => {
             render_art_editor_ui(app, frame, main_layout[1]);
         }
+        InputMode::ArtPreview => {
+            // For art preview, we want to use the full screen, not just the board area
+            // This will be handled after the status area rendering
+        }
         _ => {
             // Includes EnterBaseUrl, EnterCustomBaseUrlText, EnterAccessToken, EnterRefreshToken, None
             render_board_display(app, frame, main_layout[1]);
@@ -156,6 +166,18 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
     // If ShowStatusLog mode is active, render the status log popup on top of everything else
     if app.input_mode == InputMode::ShowStatusLog {
         render_status_log_popup(app, frame);
+    }
+
+    // If ArtPreview mode is active, render the art preview popup on top of everything else
+    if app.input_mode == InputMode::ArtPreview {
+        render_art_preview_ui(app, frame, frame.size());
+    }
+
+    // If ArtSelection mode is active, also render the full-screen preview of the selected art
+    if app.input_mode == InputMode::ArtSelection {
+        if let Some(selected_art) = app.available_pixel_arts.get(app.art_selection_index) {
+            render_art_preview_fullscreen(selected_art, app, frame, frame.size());
+        }
     }
 }
 

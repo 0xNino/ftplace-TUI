@@ -111,6 +111,7 @@ impl App {
             art_editor_viewport_y: 0,
             available_pixel_arts: Vec::new(),
             art_selection_index: 0,
+            art_preview_art: None,
             art_queue: Vec::new(),
             queue_selection_index: 0,
             queue_processing: false,
