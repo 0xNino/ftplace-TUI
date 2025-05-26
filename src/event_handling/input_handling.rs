@@ -242,7 +242,7 @@ impl App {
             }
             MouseEventKind::ScrollUp => {
                 // Scroll up - move viewport up
-                self.board_viewport_y = self.board_viewport_y.saturating_sub(5);
+                self.board_viewport_y = self.board_viewport_y.saturating_sub(15);
                 self.status_message = format!(
                     "Scrolled up. Viewport at ({}, {})",
                     self.board_viewport_x, self.board_viewport_y
@@ -250,9 +250,25 @@ impl App {
             }
             MouseEventKind::ScrollDown => {
                 // Scroll down - move viewport down
-                self.board_viewport_y = self.board_viewport_y.saturating_add(5);
+                self.board_viewport_y = self.board_viewport_y.saturating_add(15);
                 self.status_message = format!(
                     "Scrolled down. Viewport at ({}, {})",
+                    self.board_viewport_x, self.board_viewport_y
+                );
+            }
+            MouseEventKind::ScrollLeft => {
+                // Scroll left - move viewport right (natural scrolling)
+                self.board_viewport_x = self.board_viewport_x.saturating_add(15);
+                self.status_message = format!(
+                    "Scrolled left. Viewport at ({}, {})",
+                    self.board_viewport_x, self.board_viewport_y
+                );
+            }
+            MouseEventKind::ScrollRight => {
+                // Scroll right - move viewport left (natural scrolling)
+                self.board_viewport_x = self.board_viewport_x.saturating_sub(15);
+                self.status_message = format!(
+                    "Scrolled right. Viewport at ({}, {})",
                     self.board_viewport_x, self.board_viewport_y
                 );
             }
@@ -507,10 +523,10 @@ impl App {
 
         if !art_moved {
             match key_code {
-                KeyCode::Up => self.board_viewport_y = self.board_viewport_y.saturating_sub(10),
-                KeyCode::Down => self.board_viewport_y = self.board_viewport_y.saturating_add(10),
-                KeyCode::Left => self.board_viewport_x = self.board_viewport_x.saturating_sub(5),
-                KeyCode::Right => self.board_viewport_x = self.board_viewport_x.saturating_add(5),
+                KeyCode::Up => self.board_viewport_y = self.board_viewport_y.saturating_sub(25),
+                KeyCode::Down => self.board_viewport_y = self.board_viewport_y.saturating_add(25),
+                KeyCode::Left => self.board_viewport_x = self.board_viewport_x.saturating_sub(15),
+                KeyCode::Right => self.board_viewport_x = self.board_viewport_x.saturating_add(15),
                 KeyCode::Esc => {
                     if self.queue_processing {
                         self.cancel_queue_processing();
