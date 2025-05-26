@@ -784,6 +784,7 @@ impl App {
         }
 
         self.art_queue[index].paused = true;
+        let _ = self.save_queue(); // Auto-save after pausing item
         self.status_message = format!(
             "Paused queue item '{}'. It will be skipped during processing.",
             self.art_queue[index].art.name
@@ -806,6 +807,7 @@ impl App {
         }
 
         self.art_queue[index].paused = false;
+        let _ = self.save_queue(); // Auto-save after resuming item
         self.status_message = format!(
             "Resumed queue item '{}'. It will be processed normally.",
             self.art_queue[index].art.name

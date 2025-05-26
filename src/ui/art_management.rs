@@ -289,7 +289,7 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
         Line::from("j/n  : Move item down"),
         Line::from("Enter: Start processing"),
         Line::from("Space: Pause/Resume queue"),
-        Line::from("s    : Suspend/Start item"),
+        Line::from("p/s  : Pause/Resume item"),
         Line::from("1-5  : Set priority"),
         Line::from("d/Del: Remove item"),
         Line::from("c    : Clear queue"),

@@ -168,19 +168,26 @@ impl App {
                 // Check for cooldown before placing pixel
                 if let Some(ref info) = user_info {
                     if info.pixel_buffer <= 0 && info.pixel_timer > 0 {
-                        let cooldown_remaining = Some(info.pixel_timer as u32);
+                        let cooldown_duration = Duration::from_secs(info.pixel_timer as u64);
+                        let start_time = Instant::now();
 
-                        // Send cooldown progress update
-                        let _ = tx.send(PlacementUpdate::Progress {
-                            art_name: art_to_place.name.clone(),
-                            pixel_index: index,
-                            total_pixels,
-                            position: (abs_x, abs_y),
-                            cooldown_remaining,
-                        });
+                        // Wait for cooldown with periodic updates
+                        while start_time.elapsed() < cooldown_duration {
+                            let remaining_secs =
+                                (cooldown_duration - start_time.elapsed()).as_secs() as u32;
 
-                        // Wait for cooldown
-                        tokio::time::sleep(Duration::from_secs(info.pixel_timer as u64)).await;
+                            // Send cooldown progress update with actual remaining time
+                            let _ = tx.send(PlacementUpdate::Progress {
+                                art_name: art_to_place.name.clone(),
+                                pixel_index: index,
+                                total_pixels,
+                                position: (abs_x, abs_y),
+                                cooldown_remaining: Some(remaining_secs),
+                            });
+
+                            // Sleep for 1 second before next update
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                        }
                     }
                 }
 

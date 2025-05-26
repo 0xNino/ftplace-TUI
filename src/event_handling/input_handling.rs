@@ -795,12 +795,36 @@ impl App {
                     .get(self.art_selection_index)
                     .cloned()
                 {
+                    let mut art_to_load = selected_art.clone();
+
+                    // Center the art in the current viewport
+                    if let Some((_, _, board_width, board_height)) = self.board_area_bounds {
+                        // Calculate viewport center in board coordinates
+                        let viewport_center_x =
+                            self.board_viewport_x as i32 + (board_width as i32 / 2);
+                        let viewport_center_y =
+                            self.board_viewport_y as i32 + (board_height as i32); // *2 because half-blocks
+
+                        // Get art dimensions to center it properly
+                        let art_dimensions = crate::art::get_art_dimensions(&art_to_load);
+                        let art_center_offset_x = art_dimensions.0 / 2;
+                        let art_center_offset_y = art_dimensions.1 / 2;
+
+                        // Position art so its center aligns with viewport center
+                        art_to_load.board_x = viewport_center_x - art_center_offset_x;
+                        art_to_load.board_y = viewport_center_y - art_center_offset_y;
+                    } else {
+                        // Fallback: center in current viewport using viewport coordinates
+                        art_to_load.board_x = self.board_viewport_x as i32 + 25; // Rough center estimate
+                        art_to_load.board_y = self.board_viewport_y as i32 + 15;
+                    }
+
                     // Load art for positioning
-                    self.loaded_art = Some(selected_art.clone());
+                    self.loaded_art = Some(art_to_load.clone());
                     self.input_mode = InputMode::None;
                     self.status_message = format!(
-                        "Loaded art: '{}'. Use arrows to position, Enter to add to queue.",
-                        selected_art.name
+                        "Loaded art: '{}' at ({}, {}). Use arrows to position, Enter to add to queue.",
+                        art_to_load.name, art_to_load.board_x, art_to_load.board_y
                     );
                 }
             }
@@ -834,6 +858,7 @@ impl App {
                     self.art_queue
                         .swap(self.queue_selection_index - 1, self.queue_selection_index);
                     self.queue_selection_index -= 1;
+                    let _ = self.save_queue(); // Auto-save after reordering
                     self.status_message = format!(
                         "Moved '{}' up in queue",
                         self.art_queue[self.queue_selection_index].art.name
@@ -848,6 +873,7 @@ impl App {
                     self.art_queue
                         .swap(self.queue_selection_index, self.queue_selection_index + 1);
                     self.queue_selection_index += 1;
+                    let _ = self.save_queue(); // Auto-save after reordering
                     self.status_message = format!(
                         "Moved '{}' down in queue",
                         self.art_queue[self.queue_selection_index].art.name
@@ -897,6 +923,7 @@ impl App {
                     };
                     self.art_queue[self.queue_selection_index].priority = priority;
                     self.sort_queue_by_priority();
+                    let _ = self.save_queue(); // Auto-save after priority change
                     self.status_message = format!(
                         "Set priority {} for '{}'",
                         priority, self.art_queue[self.queue_selection_index].art.name
@@ -925,6 +952,10 @@ impl App {
             KeyCode::Char(' ') => {
                 // Toggle queue pause/resume
                 self.toggle_queue_pause();
+            }
+            KeyCode::Char('p') | KeyCode::Char('s') => {
+                // Toggle pause/resume for selected queue item
+                self.toggle_selected_queue_item_pause();
             }
             _ => {}
         }
