@@ -20,6 +20,9 @@ pub fn render_help_popup(_app: &App, frame: &mut Frame) {
         Line::from(" i: Show user profile panel"),
         Line::from(" h: Show status log history"),
         Line::from(" w: Work queue management"),
+        Line::from(" x: Share loaded art with coordinates"),
+        Line::from(" v: View/import shared arts"),
+        Line::from(" z: Enter share string for quick positioning"),
         Line::from(" Arrows: Scroll board viewport"),
         Line::from(" Mouse Wheel: Scroll board viewport vertically"),
         Line::from(" Left Click: Show coordinates (or move loaded art)"),
@@ -375,24 +378,24 @@ pub fn render_status_log_popup(app: &App, frame: &mut Frame) {
         )));
     } else {
         // Show messages in reverse chronological order (newest first)
-        // Use a fixed reference time to avoid "0 seconds ago" issues when popup is reopened
-        let reference_time = std::time::Instant::now();
-        for (message, timestamp) in app.status_messages.iter().rev() {
-            // Format timestamp with fixed width to prevent shifting
-            let elapsed = reference_time.duration_since(*timestamp);
+        for (message, _timestamp, utc2_timestamp) in app.status_messages.iter().rev() {
+            // Skip pending API calls (messages with hourglass emoji)
+            if message.contains("⏳") {
+                continue;
+            }
 
-            let time_str = if elapsed.as_secs() < 60 {
-                format!("{:2}s ago", elapsed.as_secs())
-            } else if elapsed.as_secs() < 3600 {
-                format!("{:2}m ago", elapsed.as_secs() / 60)
+            // Extract only the time portion (HH:MM:SS) from the timestamp
+            let time_only = if utc2_timestamp.len() >= 19 {
+                // Extract "HH:MM:SS" from "YYYY-MM-DD HH:MM:SS"
+                &utc2_timestamp[11..19]
             } else {
-                format!("{:2}h ago", elapsed.as_secs() / 3600)
+                utc2_timestamp // Fallback to full timestamp if format is unexpected
             };
 
-            // Create a line with timestamp and message
+            // Create a line with time-only timestamp and message
             log_lines.push(Line::from(vec![
                 Span::styled(
-                    format!("[{}] ", time_str),
+                    format!("[{}] ", time_only),
                     Style::default()
                         .fg(Color::Gray)
                         .add_modifier(Modifier::ITALIC),

@@ -20,6 +20,9 @@ pub enum InputMode {
     ShowHelp,               // New mode for displaying available commands
     ShowProfile,            // New mode for displaying user profile
     ShowStatusLog,          // New mode for displaying status message history
+    EnterShareMessage,      // New mode for entering share message
+    EnterShareString,       // New mode for entering/parsing share strings
+    ShareSelection,         // New mode for selecting from received shares
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -51,8 +54,8 @@ pub struct App {
     pub input_mode: InputMode,
     pub input_buffer: String, // Generic input buffer (renamed from cookie_input_buffer for clarity)
     pub status_message: String, // To display messages to the user
-    pub status_messages: VecDeque<(String, Instant)>, // History of recent status messages
-    pub cooldown_status: String, // Persistent cooldown/timer info
+    pub status_messages: VecDeque<(String, Instant, String)>, // History: (message, instant, utc+2_timestamp)
+    pub cooldown_status: String,                              // Persistent cooldown/timer info
     pub board: Vec<Vec<Option<PixelNetwork>>>,
     pub colors: Vec<ColorInfo>,
     pub user_info: Option<UserInfos>,
@@ -109,6 +112,12 @@ pub struct App {
 
     // Mouse support
     pub board_area_bounds: Option<(u16, u16, u16, u16)>, // (x, y, width, height) of the board display area
+
+    // Sharing system
+    pub available_shares: Vec<crate::art::ShareablePixelArt>, // List of received shares
+    pub share_selection_index: usize,                         // Current selection in shares list
+    pub current_share_art: Option<PixelArt>,                  // Art being prepared for sharing
+    pub current_share_coords: Option<(i32, i32)>,             // Coordinates for sharing
 }
 
 #[derive(Debug)]

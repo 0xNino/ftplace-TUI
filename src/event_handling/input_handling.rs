@@ -306,6 +306,16 @@ impl App {
             InputMode::ShowStatusLog => {
                 self.handle_status_log_input(key_code);
             }
+
+            InputMode::EnterShareMessage => {
+                self.handle_share_message_input(key_code);
+            }
+            InputMode::EnterShareString => {
+                self.handle_share_string_input(key_code);
+            }
+            InputMode::ShareSelection => {
+                self.handle_share_selection_input(key_code);
+            }
             InputMode::ArtEditorNewArtName => {
                 self.handle_new_art_name_input(key_code);
             }
@@ -595,6 +605,26 @@ impl App {
                     // Toggle pause/resume for selected queue item (s for suspend/start)
                     self.toggle_selected_queue_item_pause();
                 }
+                KeyCode::Char('x') => {
+                    // Share current loaded art with coordinates
+                    if let Some(art) = &self.loaded_art {
+                        self.start_art_sharing(art.clone(), art.board_x, art.board_y);
+                    } else {
+                        self.status_message =
+                            "No art loaded to share. Load art first with 'l'.".to_string();
+                    }
+                }
+                KeyCode::Char('v') => {
+                    // View/import shared arts
+                    self.open_share_selection();
+                }
+                KeyCode::Char('z') => {
+                    // Enter share string for quick coordinate sharing
+                    self.input_mode = InputMode::EnterShareString;
+                    self.input_buffer.clear();
+                    self.status_message =
+                        "Enter share string (ftplace-share: NAME at (X, Y)):".to_string();
+                }
                 _ => {}
             }
         }
@@ -752,6 +782,10 @@ impl App {
                         pattern: Vec::new(),
                         board_x: 0,
                         board_y: 0,
+                        description: None,
+                        author: None,
+                        created_at: Some(chrono::Utc::now().to_rfc3339()),
+                        tags: None,
                     });
                     self.input_mode = InputMode::ArtEditor;
                     self.status_message = format!(
@@ -976,5 +1010,79 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    fn handle_share_message_input(&mut self, key_code: KeyCode) {
+        match key_code {
+            KeyCode::Enter => {
+                let share_message = if self.input_buffer.trim().is_empty() {
+                    None
+                } else {
+                    Some(self.input_buffer.trim().to_string())
+                };
+                self.complete_art_sharing(share_message);
+            }
+            KeyCode::Esc => {
+                self.input_mode = InputMode::None;
+                self.current_share_art = None;
+                self.current_share_coords = None;
+                self.status_message = "Art sharing cancelled.".to_string();
+            }
+            KeyCode::Backspace => {
+                self.input_buffer.pop();
+            }
+            KeyCode::Char(c) => {
+                self.input_buffer.push(c);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_share_string_input(&mut self, key_code: KeyCode) {
+        match key_code {
+            KeyCode::Enter => {
+                let share_string = self.input_buffer.trim().to_string();
+                if !share_string.is_empty() {
+                    self.apply_share_string(&share_string);
+                } else {
+                    self.status_message = "Empty share string.".to_string();
+                    self.input_mode = InputMode::None;
+                }
+            }
+            KeyCode::Esc => {
+                self.input_mode = InputMode::None;
+                self.status_message = "Share string input cancelled.".to_string();
+            }
+            KeyCode::Backspace => {
+                self.input_buffer.pop();
+            }
+            KeyCode::Char(c) => {
+                self.input_buffer.push(c);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_share_selection_input(&mut self, key_code: KeyCode) {
+        match key_code {
+            KeyCode::Up => {
+                if self.share_selection_index > 0 {
+                    self.share_selection_index -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if self.share_selection_index < self.available_shares.len().saturating_sub(1) {
+                    self.share_selection_index += 1;
+                }
+            }
+            KeyCode::Enter => {
+                self.load_shared_art(self.share_selection_index);
+            }
+            KeyCode::Esc => {
+                self.input_mode = InputMode::None;
+                self.status_message = "Share selection cancelled.".to_string();
+            }
+            _ => {}
+        }
     }
 }

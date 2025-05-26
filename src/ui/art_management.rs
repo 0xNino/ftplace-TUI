@@ -321,3 +321,172 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
 
     frame.render_widget(controls_paragraph, queue_layout[1]);
 }
+
+/// Render the share selection UI for viewing and loading shared arts
+pub fn render_share_selection_ui(app: &App, frame: &mut Frame, area: Rect) {
+    if app.available_shares.is_empty() {
+        let empty_message = Paragraph::new(vec![
+            Line::from("No shared arts available"),
+            Line::from(""),
+            Line::from("Shared arts are stored in the 'shares/' directory."),
+            Line::from("You can receive shares from other users or create them"),
+            Line::from("by sharing your own arts with 'x' key."),
+            Line::from(""),
+            Line::from("Press Esc to return to main view."),
+        ])
+        .block(Block::default().borders(Borders::ALL).title("Shared Arts"));
+        frame.render_widget(empty_message, area);
+        return;
+    }
+
+    let share_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(60), // Share list
+            Constraint::Percentage(40), // Details
+        ])
+        .split(area);
+
+    // Render share list on the left
+    let share_items: Vec<ListItem> = app
+        .available_shares
+        .iter()
+        .enumerate()
+        .map(|(idx, shareable)| {
+            let art = &shareable.art;
+            let dimensions = crate::art::get_art_dimensions(art);
+
+            let share_info = if let Some(msg) = &shareable.share_message {
+                format!(" - {}", msg)
+            } else {
+                String::new()
+            };
+
+            let item_text = format!(
+                "{} @ ({}, {}) ({}x{}){}",
+                art.name,
+                shareable.board_x,
+                shareable.board_y,
+                dimensions.0,
+                dimensions.1,
+                share_info
+            );
+
+            if idx == app.share_selection_index {
+                ListItem::new(item_text).style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                ListItem::new(item_text)
+            }
+        })
+        .collect();
+
+    let share_list = List::new(share_items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Shared Arts (Enter to load, Esc to cancel)"),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▶ ");
+
+    let mut list_state = ListState::default();
+    list_state.select(Some(app.share_selection_index));
+
+    frame.render_stateful_widget(share_list, share_layout[0], &mut list_state);
+
+    // Render details on the right
+    if let Some(selected_share) = app.available_shares.get(app.share_selection_index) {
+        render_share_details(selected_share, app, frame, share_layout[1]);
+    }
+}
+
+/// Render details of a selected shared art
+fn render_share_details(
+    shareable: &crate::art::ShareablePixelArt,
+    _app: &App,
+    frame: &mut Frame,
+    area: Rect,
+) {
+    let art = &shareable.art;
+    let dimensions = crate::art::get_art_dimensions(art);
+
+    let mut details_lines = vec![
+        Line::from(Span::styled(
+            format!("Art: {}", art.name),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(format!(
+            "Position: ({}, {})",
+            shareable.board_x, shareable.board_y
+        )),
+        Line::from(format!(
+            "Size: {}x{} ({} pixels)",
+            dimensions.0,
+            dimensions.1,
+            art.pattern.len()
+        )),
+        Line::from(""),
+    ];
+
+    if let Some(description) = &art.description {
+        details_lines.push(Line::from(format!("Description: {}", description)));
+    }
+
+    if let Some(author) = &art.author {
+        details_lines.push(Line::from(format!("Author: {}", author)));
+    }
+
+    if let Some(shared_by) = &shareable.shared_by {
+        details_lines.push(Line::from(format!("Shared by: {}", shared_by)));
+    }
+
+    if let Some(share_message) = &shareable.share_message {
+        details_lines.push(Line::from(""));
+        details_lines.push(Line::from(Span::styled(
+            "Share Message:",
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+        details_lines.push(Line::from(share_message.clone()));
+    }
+
+    details_lines.push(Line::from(""));
+    details_lines.push(Line::from(format!(
+        "Shared: {}",
+        chrono::DateTime::parse_from_rfc3339(&shareable.shared_at)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_else(|_| shareable.shared_at.clone())
+    )));
+
+    if let Some(tags) = &art.tags {
+        if !tags.is_empty() {
+            details_lines.push(Line::from(""));
+            details_lines.push(Line::from(format!("Tags: {}", tags.join(", "))));
+        }
+    }
+
+    details_lines.push(Line::from(""));
+    details_lines.push(Line::from("Share String:"));
+    let share_string = crate::art::generate_share_string(art, shareable.board_x, shareable.board_y);
+    details_lines.push(Line::from(Span::styled(
+        share_string,
+        Style::default().fg(Color::Cyan),
+    )));
+
+    let details_paragraph = Paragraph::new(details_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Share Details"),
+        )
+        .wrap(Wrap { trim: false });
+
+    frame.render_widget(details_paragraph, area);
+}

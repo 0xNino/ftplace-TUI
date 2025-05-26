@@ -15,7 +15,7 @@ impl App {
                 total_items,
             } => {
                 self.add_status_message(format!(
-                    "Queue processing: Starting item {}/{} - '{}'",
+                    "🔄 Queue processing: Starting item {}/{} - '{}'",
                     item_index + 1,
                     total_items,
                     art_name
@@ -36,7 +36,7 @@ impl App {
                 }
 
                 let base_msg = format!(
-                    "Queue item {}: '{}' - placed {}/{} pixels at ({}, {})",
+                    "📋 Queue item {}: '{}' - placed {}/{} pixels at ({}, {})",
                     item_index + 1,
                     art_name,
                     pixels_placed, // Show successful placements count
@@ -52,12 +52,12 @@ impl App {
                         let seconds = cooldown % 60;
                         if seconds > 0 {
                             self.add_status_message(format!(
-                                "{} | Long cooldown: {}m {}s (checking every minute)",
+                                "{} | Long cooldown: {}m {}s",
                                 base_msg, minutes, seconds
                             ));
                         } else {
                             self.add_status_message(format!(
-                                "{} | Long cooldown: {}m (checking every minute)",
+                                "{} | Long cooldown: {}m",
                                 base_msg, minutes
                             ));
                         }
@@ -83,7 +83,7 @@ impl App {
                 }
 
                 self.add_status_message(format!(
-                    "Queue item {}: '{}' completed - {}/{} pixels placed",
+                    "✅ Queue item {}: '{}' completed - {}/{} pixels placed",
                     item_index + 1,
                     art_name,
                     pixels_placed,
@@ -101,7 +101,7 @@ impl App {
                 }
 
                 self.add_status_message(format!(
-                    "Queue item {}: '{}' failed - {}",
+                    "❌ Queue item {}: '{}' failed - {}",
                     item_index + 1,
                     art_name,
                     error_msg
@@ -118,7 +118,7 @@ impl App {
                 }
 
                 self.add_status_message(format!(
-                    "Queue item {}: '{}' skipped - {}",
+                    "⏭️ Queue item {}: '{}' skipped - {}",
                     item_index + 1,
                     art_name,
                     reason
@@ -130,7 +130,7 @@ impl App {
                 duration_secs,
             } => {
                 self.add_status_message(format!(
-					"Queue processing complete! {} items processed, {} pixels placed in {}s. Refreshing board...",
+					"🎉 Queue processing complete! {} items processed, {} pixels placed in {}s. Refreshing board...",
 					total_items_processed,
 					total_pixels_placed,
 					duration_secs
@@ -149,7 +149,7 @@ impl App {
                 total_pixels_placed,
             } => {
                 self.add_status_message(format!(
-					"Queue processing cancelled: {} items processed, {} pixels placed. Press 'r' to refresh board.",
+					"🛑 Queue processing cancelled: {} items processed, {} pixels placed. Press 'r' to refresh board.",
 					items_processed,
 					total_pixels_placed
 				));
@@ -167,7 +167,7 @@ impl App {
             } => {
                 self.queue_paused = true;
                 self.add_status_message(format!(
-                    "Queue paused at item {}: '{}' - {}/{} pixels placed. Press 'space' to resume.",
+                    "⏸️ Queue paused at item {}: '{}' - {}/{} pixels placed. Press 'space' to resume.",
                     item_index + 1,
                     art_name,
                     pixels_placed,
@@ -180,7 +180,7 @@ impl App {
             } => {
                 self.queue_paused = false;
                 self.add_status_message(format!(
-                    "Queue resumed at item {}: '{}'",
+                    "▶️ Queue resumed at item {}: '{}'",
                     item_index + 1,
                     art_name
                 ));
@@ -444,11 +444,62 @@ impl App {
 
                 let mut pixels_placed_for_item = 0; // Only count actually placed pixels
                 let mut user_info: Option<UserInfos> = None;
+                let mut pixels_placed_since_refresh = 0; // Track pixels placed since last board refresh
+                let mut last_board_refresh = Instant::now(); // Track time since last board refresh
+                const REFRESH_INTERVAL_PIXELS: usize = 10; // Refresh every 10 pixels
+                const REFRESH_INTERVAL_SECONDS: u64 = 60; // Refresh every 1 minute
 
                 // Process each pixel that needs to be placed
                 for (_original_pixel_index, art_pixel) in pixels_to_place {
                     let abs_x = queue_item.art.board_x + art_pixel.x;
                     let abs_y = queue_item.art.board_y + art_pixel.y;
+
+                    // Check if we need to refresh board data (every 20 pixels or 2 minutes)
+                    let should_refresh = pixels_placed_since_refresh >= REFRESH_INTERVAL_PIXELS
+                        || last_board_refresh.elapsed().as_secs() >= REFRESH_INTERVAL_SECONDS;
+
+                    if should_refresh {
+                        // Refresh board data to detect pixels overwritten by other users
+                        match api_client.get_board().await {
+                            Ok(board_response) => {
+                                // Update shared board state
+                                if let Ok(mut board_lock) = board_state.write() {
+                                    *board_lock = board_response.board;
+                                }
+
+                                // Re-check if this pixel still needs to be placed
+                                let board_lock = board_state.read().unwrap();
+                                if Self::is_pixel_already_correct_static(
+                                    &board_lock,
+                                    abs_x,
+                                    abs_y,
+                                    art_pixel.color,
+                                ) {
+                                    // Pixel was corrected by someone else, skip it
+                                    let _ = tx.send(QueueUpdate::ApiCall {
+                                        message: format!(
+                                            "📡 GET /api/get → ✅ 200 (board refresh)"
+                                        ),
+                                    });
+                                    continue;
+                                }
+                                drop(board_lock);
+
+                                pixels_placed_since_refresh = 0;
+                                last_board_refresh = Instant::now();
+
+                                let _ = tx.send(QueueUpdate::ApiCall {
+                                    message: format!("📡 GET /api/get → ✅ 200 (board refresh)"),
+                                });
+                            }
+                            Err(_) => {
+                                // Board refresh failed, continue with current data
+                                let _ = tx.send(QueueUpdate::ApiCall {
+                                    message: format!("📡 GET /api/get → ❌ ERR (refresh failed)"),
+                                });
+                            }
+                        }
+                    }
 
                     // ALWAYS check cooldown before attempting each pixel (critical fix!)
                     // This ensures we respect cooldowns from previous 425 error responses
@@ -565,11 +616,12 @@ impl App {
                             Ok(response) => {
                                 // Send success log
                                 let _ = tx.send(QueueUpdate::ApiCall {
-                                    message: format!("🎨 POST /api/set → ✅200"),
+                                    message: format!("🎨 POST /api/set → ✅ 200"),
                                 });
 
                                 pixels_placed_for_item += 1;
                                 total_pixels_placed += 1;
+                                pixels_placed_since_refresh += 1; // Track for board refresh timing
                                 user_info = Some(response.user_infos);
                                 break; // Successfully placed, move to next pixel
                             }
@@ -584,15 +636,15 @@ impl App {
                                             500..=599 => "💥",
                                             _ => "❓",
                                         };
-                                        format!("{}{}", status_emoji, status.as_u16())
+                                        format!("{} {}", status_emoji, status.as_u16())
                                     }
                                     crate::api_client::ApiError::Unauthorized => {
-                                        "❌401".to_string()
+                                        "❌ 401".to_string()
                                     }
                                     crate::api_client::ApiError::TokenRefreshedPleaseRetry => {
-                                        "🔄426".to_string()
+                                        "🔄 426".to_string()
                                     }
-                                    _ => "💥ERR".to_string(),
+                                    _ => "💥 ERR".to_string(),
                                 };
 
                                 let _ = tx.send(QueueUpdate::ApiCall {
@@ -1162,15 +1214,18 @@ impl App {
 
     /// Save queue to file
     pub fn save_queue(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // Create queue directory if it doesn't exist
+        std::fs::create_dir_all("queue")?;
+
         let queue_data = serde_json::to_string_pretty(&self.art_queue)?;
-        std::fs::write("queue.json", queue_data)?;
+        std::fs::write("queue/queue.json", queue_data)?;
         Ok(())
     }
 
     /// Load queue from file
     pub fn load_queue(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if std::path::Path::new("queue.json").exists() {
-            let queue_data = std::fs::read_to_string("queue.json")?;
+        if std::path::Path::new("queue/queue.json").exists() {
+            let queue_data = std::fs::read_to_string("queue/queue.json")?;
             self.art_queue = serde_json::from_str(&queue_data)?;
 
             let pending_count = self
@@ -1214,11 +1269,173 @@ impl App {
 
             if pending_count > 0 {
                 self.add_status_message(format!(
-                    "Auto-resuming queue processing: {} pending items found.",
+                    "🔄 Auto-resuming queue processing: {} pending items found.",
                     pending_count
                 ));
                 self.trigger_queue_processing();
             }
+        }
+    }
+
+    /// Start art sharing process
+    pub fn start_art_sharing(&mut self, art: PixelArt, board_x: i32, board_y: i32) {
+        self.current_share_art = Some(art.clone());
+        self.current_share_coords = Some((board_x, board_y));
+        self.input_mode = crate::app_state::InputMode::EnterShareMessage;
+        self.input_buffer.clear();
+        self.status_message = format!(
+            "Sharing '{}' at ({}, {}). Enter share message (optional):",
+            art.name, board_x, board_y
+        );
+    }
+
+    /// Open share selection interface
+    pub fn open_share_selection(&mut self) {
+        // Load available shares
+        self.available_shares = crate::art::get_available_shareable_arts();
+
+        if self.available_shares.is_empty() {
+            self.status_message =
+                "No shared arts available. Shares are stored in the 'shares/' directory."
+                    .to_string();
+        } else {
+            self.input_mode = crate::app_state::InputMode::ShareSelection;
+            self.share_selection_index = 0;
+            self.status_message = format!(
+                "Found {} shared arts. Use arrows to navigate, Enter to load.",
+                self.available_shares.len()
+            );
+        }
+    }
+
+    /// Complete art sharing by saving to shares directory
+    pub fn complete_art_sharing(&mut self, share_message: Option<String>) {
+        if let (Some(art), Some((board_x, board_y))) =
+            (&self.current_share_art, self.current_share_coords)
+        {
+            let filename = format!(
+                "{}_at_{}_{}.json",
+                art.name.replace(' ', "_").to_lowercase(),
+                board_x,
+                board_y
+            );
+            let file_path = std::path::Path::new("shares").join(&filename);
+
+            match crate::art::save_shareable_pixel_art(
+                art,
+                board_x,
+                board_y,
+                share_message,
+                None, // Could be enhanced to include username
+                &file_path,
+            ) {
+                Ok(()) => {
+                    let share_string = crate::art::generate_share_string(art, board_x, board_y);
+                    self.status_message = format!(
+                        "Art shared! Saved to {}. Share string: {}",
+                        filename, share_string
+                    );
+                }
+                Err(e) => {
+                    self.status_message = format!("Failed to save share: {}", e);
+                }
+            }
+        } else {
+            self.status_message = "No art to share.".to_string();
+        }
+
+        // Reset sharing state
+        self.current_share_art = None;
+        self.current_share_coords = None;
+        self.input_mode = crate::app_state::InputMode::None;
+    }
+
+    /// Load shared art from selection
+    pub fn load_shared_art(&mut self, index: usize) {
+        if index < self.available_shares.len() {
+            let shareable = &self.available_shares[index];
+            let mut art = shareable.art.clone();
+            art.board_x = shareable.board_x;
+            art.board_y = shareable.board_y;
+
+            // Move viewport to center on the art location
+            let art_dimensions = crate::art::get_art_dimensions(&art);
+            let art_center_x = art.board_x + art_dimensions.0 / 2;
+            let art_center_y = art.board_y + art_dimensions.1 / 2;
+
+            // Center the viewport on the art (with some padding)
+            if let Some((_, _, board_width, board_height)) = self.board_area_bounds {
+                // Calculate viewport position to center the art
+                let viewport_x = (art_center_x - (board_width as i32 / 2)).max(0) as u16;
+                let viewport_y = (art_center_y - (board_height as i32)).max(0) as u16; // *2 for half-blocks
+
+                self.board_viewport_x = viewport_x;
+                self.board_viewport_y = viewport_y;
+            } else {
+                // Fallback if board bounds not available
+                self.board_viewport_x = (art.board_x - 25).max(0) as u16;
+                self.board_viewport_y = (art.board_y - 15).max(0) as u16;
+            }
+
+            self.loaded_art = Some(art.clone());
+            self.input_mode = crate::app_state::InputMode::None;
+
+            let share_info = if let Some(msg) = &shareable.share_message {
+                format!(" ({})", msg)
+            } else {
+                String::new()
+            };
+
+            self.status_message = format!(
+                "Loaded shared art '{}' at ({}, {}){}. Viewport moved to art location. Use arrows to reposition or Enter to queue.",
+                art.name, art.board_x, art.board_y, share_info
+            );
+        }
+    }
+
+    /// Parse and apply share string
+    pub fn apply_share_string(&mut self, share_string: &str) {
+        if let Some((art_name, x, y)) = crate::art::parse_share_string(share_string) {
+            // Find matching art in available arts
+            let available_arts = crate::art::get_available_pixel_arts();
+            if let Some(mut art) = available_arts.into_iter().find(|a| a.name == art_name) {
+                art.board_x = x;
+                art.board_y = y;
+
+                // Move viewport to center on the art location
+                let art_dimensions = crate::art::get_art_dimensions(&art);
+                let art_center_x = art.board_x + art_dimensions.0 / 2;
+                let art_center_y = art.board_y + art_dimensions.1 / 2;
+
+                // Center the viewport on the art (with some padding)
+                if let Some((_, _, board_width, board_height)) = self.board_area_bounds {
+                    // Calculate viewport position to center the art
+                    let viewport_x = (art_center_x - (board_width as i32 / 2)).max(0) as u16;
+                    let viewport_y = (art_center_y - (board_height as i32)).max(0) as u16; // *2 for half-blocks
+
+                    self.board_viewport_x = viewport_x;
+                    self.board_viewport_y = viewport_y;
+                } else {
+                    // Fallback if board bounds not available
+                    self.board_viewport_x = (art.board_x - 25).max(0) as u16;
+                    self.board_viewport_y = (art.board_y - 15).max(0) as u16;
+                }
+
+                self.loaded_art = Some(art.clone());
+                self.input_mode = crate::app_state::InputMode::None;
+                self.status_message = format!(
+                    "Applied share coordinates: '{}' positioned at ({}, {}). Viewport moved to art location.",
+                    art.name, x, y
+                );
+            } else {
+                self.status_message = format!(
+                    "Art '{}' not found in available arts. Coordinates: ({}, {})",
+                    art_name, x, y
+                );
+            }
+        } else {
+            self.status_message =
+                "Invalid share string format. Expected: ftplace-share: NAME at (X, Y)".to_string();
         }
     }
 }

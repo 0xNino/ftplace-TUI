@@ -27,6 +27,10 @@ impl App {
                 pattern: art.pattern.clone(),
                 board_x: 0, // Don't save board position to file
                 board_y: 0,
+                description: art.description.clone(),
+                author: art.author.clone(),
+                created_at: art.created_at.clone(),
+                tags: art.tags.clone(),
             };
             match serde_json::to_string_pretty(&art_with_name) {
                 Ok(json_data) => {

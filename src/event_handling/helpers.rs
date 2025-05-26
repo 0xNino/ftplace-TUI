@@ -122,9 +122,13 @@ impl App {
 
     /// Add a new status message to the history and update the main status
     pub fn add_status_message(&mut self, message: String) {
+        // Generate UTC+2 timestamp
+        let now = chrono::Utc::now() + chrono::Duration::hours(2);
+        let timestamp_utc2 = now.format("%Y-%m-%d %H:%M:%S").to_string();
+
         // Add to history with timestamp
         self.status_messages
-            .push_back((message.clone(), Instant::now()));
+            .push_back((message.clone(), Instant::now(), timestamp_utc2));
 
         // Keep only last 100 messages (increased from 5)
         while self.status_messages.len() > 100 {
@@ -309,7 +313,7 @@ impl App {
     /// Clean up old status messages (older than 10 minutes)
     pub fn cleanup_old_status_messages(&mut self) {
         let cutoff = Instant::now() - Duration::from_secs(600); // 10 minutes instead of 30 seconds
-        while let Some((_, timestamp)) = self.status_messages.front() {
+        while let Some((_, timestamp, _)) = self.status_messages.front() {
             if *timestamp < cutoff {
                 self.status_messages.pop_front();
             } else {
@@ -347,5 +351,65 @@ impl App {
         };
 
         self.add_status_message(format!("{} {} {}{}", emoji, method, endpoint, status_text));
+    }
+
+    /// Save status messages to file for persistence between runs
+    pub fn save_status_messages(&self) -> Result<(), Box<dyn std::error::Error>> {
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize)]
+        struct PersistentStatusMessage {
+            message: String,
+            timestamp_utc: String, // Store as UTC+2 formatted string
+        }
+
+        let persistent_messages: Vec<PersistentStatusMessage> = self
+            .status_messages
+            .iter()
+            .map(
+                |(message, _instant, utc2_timestamp)| PersistentStatusMessage {
+                    message: message.clone(),
+                    timestamp_utc: utc2_timestamp.clone(),
+                },
+            )
+            .collect();
+
+        // Create logs directory if it doesn't exist
+        std::fs::create_dir_all("logs")?;
+
+        let json_data = serde_json::to_string_pretty(&persistent_messages)?;
+        std::fs::write("logs/status_messages.json", json_data)?;
+        Ok(())
+    }
+
+    /// Load status messages from file for persistence between runs
+    pub fn load_status_messages(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize)]
+        struct PersistentStatusMessage {
+            message: String,
+            timestamp_utc: String,
+        }
+
+        if !std::path::Path::new("logs/status_messages.json").exists() {
+            return Ok(());
+        }
+
+        let json_data = std::fs::read_to_string("logs/status_messages.json")?;
+        let persistent_messages: Vec<PersistentStatusMessage> = serde_json::from_str(&json_data)?;
+
+        // Convert back to runtime format with current Instant (for cleanup purposes)
+        // We'll use the stored UTC+2 timestamp for display
+        let now = Instant::now();
+        for persistent_msg in persistent_messages {
+            self.status_messages.push_back((
+                persistent_msg.message,
+                now,
+                persistent_msg.timestamp_utc,
+            ));
+        }
+
+        Ok(())
     }
 }

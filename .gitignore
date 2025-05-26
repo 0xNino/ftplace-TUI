@@ -3,9 +3,9 @@ target/
 
 # Specific output files
 pixel_arts/
-
-# Queue file
-queue.json
+logs/
+queue/
+shares/
 
 # Compiled artifacts and debug symbols
 *.pdb

@@ -119,10 +119,22 @@ impl App {
             last_blink_time: None,
             shared_board_state: None,
             board_area_bounds: None,
+            available_shares: Vec::new(),
+            share_selection_index: 0,
+            current_share_art: None,
+            current_share_coords: None,
         };
 
         // Load saved queue
         let _ = app.load_queue();
+
+        // Load saved status messages
+        let _ = app.load_status_messages();
+
+        // Add initial status message if we have saved config
+        if should_fetch_on_start {
+            app.add_status_message(initial_message);
+        }
 
         app
     }
@@ -132,6 +144,10 @@ impl App {
             terminal.draw(|frame| ui::render_ui(self, frame))?;
             self.handle_events().await?;
         }
+
+        // Save status messages before exiting
+        let _ = self.save_status_messages();
+
         Ok(())
     }
 }

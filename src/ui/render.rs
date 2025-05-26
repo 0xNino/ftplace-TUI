@@ -1,6 +1,8 @@
 use crate::app_state::{App, InputMode};
 use crate::ui::art_editor::render_art_editor_ui;
-use crate::ui::art_management::{render_art_queue_ui, render_art_selection_ui};
+use crate::ui::art_management::{
+    render_art_queue_ui, render_art_selection_ui, render_share_selection_ui,
+};
 use crate::ui::helpers::{
     get_current_board_color_ui, get_ratatui_color, is_pixel_already_correct_ui,
 };
@@ -49,12 +51,16 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
         InputMode::EnterCustomBaseUrlText
         | InputMode::EnterAccessToken
         | InputMode::EnterRefreshToken
-        | InputMode::ArtEditorNewArtName => {
+        | InputMode::ArtEditorNewArtName
+        | InputMode::EnterShareMessage
+        | InputMode::EnterShareString => {
             let title = match app.input_mode {
                 InputMode::EnterCustomBaseUrlText => "Custom Base URL (Editing):",
                 InputMode::EnterAccessToken => "Access Token (Editing):",
                 InputMode::EnterRefreshToken => "Refresh Token (Editing):",
                 InputMode::ArtEditorNewArtName => "New Pixel Art Name (Editing):",
+                InputMode::EnterShareMessage => "Share Message (Optional):",
+                InputMode::EnterShareString => "Share String (ftplace-share: NAME at (X, Y)):",
                 _ => "Input:", // Should not happen if logic is correct
             };
 
@@ -98,6 +104,9 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
         }
         InputMode::ArtQueue => {
             render_art_queue_ui(app, frame, input_area_rect);
+        }
+        InputMode::ShareSelection => {
+            render_share_selection_ui(app, frame, input_area_rect);
         }
         _ => {
             // For InputMode::None or ArtEditor modes, show current config (simplified)
@@ -449,7 +458,9 @@ fn render_status_area(app: &App, frame: &mut Frame, area: Rect) {
     // Add recent status messages (newest first, limit to remaining space)
     let remaining_lines = max_lines.saturating_sub(status_lines.len());
     if remaining_lines > 0 {
-        for (message, _timestamp) in app.status_messages.iter().rev().take(remaining_lines) {
+        for (message, _timestamp, _utc2_timestamp) in
+            app.status_messages.iter().rev().take(remaining_lines)
+        {
             // Truncate long messages to prevent overflow
             let truncated_message = if message.len() > 80 {
                 format!("{}...", &message[..77])
