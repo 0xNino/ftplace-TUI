@@ -62,12 +62,12 @@ A Terminal User Interface (TUI) application for automating pixel placement on ft
 ```bash
 git clone <repository-url>
 cd ftplace-TUI
-cargo build --release
+make build
 ```
 
 ### First Run
 ```bash
-cargo run
+make run
 ```
 
 The application will guide you through initial setup:
@@ -191,7 +191,6 @@ ftplace-TUI/
 │   └── queue.json          # Persistent queue state
 ├── patterns/               # Saved pixel art files
 │   └── *.json             # Individual art files
-├── myplace/               # Reference backend code
 └── README.md              # This file
 ```
 
@@ -221,15 +220,15 @@ Pixel arts are stored as JSON files with the following structure:
 
 ### API Endpoints
 The application supports multiple predefined endpoints:
-- `https://ftplace.42lausanne.ch/api` (primary target)
-- `http://localhost:3000/api` (local development)
+- `https://ftplace.42lausanne.ch` (primary target)
+- `http://localhost:7979` (local development via `make run-local`)
 - Custom URLs (entered manually)
 
 ### Token Management
 Tokens are automatically saved to `tokens.json` and restored on startup. The file contains:
 ```json
 {
-  "base_url": "https://ftplace.42lausanne.ch/api",
+  "base_url": "https://ftplace.42lausanne.ch",
   "access_token": "jwt_token_here",
   "refresh_token": "refresh_token_here"
 }
@@ -300,22 +299,45 @@ The art queue is automatically saved to `queue.json` and restored between sessio
 
 ### Building
 ```bash
-cargo build --release
+# Build release version (default)
+make build
+
+# Build debug version
+make build-debug
+
+# Clean build artifacts
+make clean
+
+# Check code without building
+make check
 ```
 
-### Running Tests
+### Running
 ```bash
-cargo test
+# Run debug version with token prompt
+make run
+
+# Run against local server (localhost:7979)
+make run-local
+
+# Or set environment variables and run
+FTPLACE_ACCESS_TOKEN="your_token" FTPLACE_REFRESH_TOKEN="your_refresh" make run
 ```
 
 ### Code Formatting
 ```bash
-cargo fmt
+make fmt
 ```
 
 ### Linting
 ```bash
-cargo clippy
+make clippy
+```
+
+### Available Make Targets
+```bash
+# Show all available commands
+make help
 ```
 
 ## 📝 License
