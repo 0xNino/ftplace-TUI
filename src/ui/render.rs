@@ -393,18 +393,23 @@ fn render_queue_overlay(app: &App, frame: &mut Frame, inner_board_area: &Rect) {
                         art_pixel.color,
                     );
 
+                    // Check if this pixel is actually correct on the backend board
+                    // Only show as "placed" if it's actually the correct color on the board
+                    let is_actually_placed = is_already_correct;
+
                     // Determine pixel state: placed, current, or pending
-                    let is_placed = pixel_index < queue_item.pixels_placed;
+                    let is_placed = pixel_index < queue_item.pixels_placed && is_actually_placed;
                     let is_current = pixel_index == queue_item.pixels_placed
                         && queue_item.status == crate::app_state::QueueStatus::InProgress;
-                    let is_pending = pixel_index >= queue_item.pixels_placed
+                    let is_pending = (pixel_index >= queue_item.pixels_placed
+                        || !is_actually_placed)
                         && queue_item.status == crate::app_state::QueueStatus::Pending;
 
                     // Get the target color for this pixel
                     let target_color = get_ratatui_color(app, art_pixel.color, Color::White);
 
                     if is_placed {
-                        // Show pixels that were actually placed by queue processing
+                        // Show pixels that were actually placed by queue processing AND are correct on board
                         cell.set_char('▀');
                         if (art_abs_y - app.board_viewport_y as i32) % 2 == 0 {
                             cell.set_fg(target_color);
