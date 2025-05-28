@@ -428,7 +428,7 @@ pub fn render_art_preview_fullscreen(
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::White))
             .title(format!(
-                "Preview: {} (Enter to load, Esc to cancel)",
+                "Preview: {} (Enter: load, d: delete, Esc: cancel)",
                 art.name
             )),
         popup_area,
@@ -537,7 +537,7 @@ pub fn render_art_preview_fullscreen(
     };
 
     let info_text = format!(
-        "Size: {}x{} pixels | Scale: {:.1}x | Use ↑↓ to browse, Enter to load",
+        "Size: {}x{} pixels | Scale: {:.1}x | Use ↑↓ to browse, 'd' to delete, Enter to load",
         art_width, art_height, scale
     );
 

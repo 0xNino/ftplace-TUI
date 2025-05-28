@@ -284,6 +284,9 @@ impl App {
             InputMode::ArtQueue => {
                 self.handle_queue_input(key_code).await?;
             }
+            InputMode::ArtDeleteConfirmation => {
+                self.handle_delete_confirmation_input(key_code);
+            }
         }
         Ok(())
     }
@@ -867,6 +870,21 @@ impl App {
                 self.input_mode = InputMode::None;
                 self.status_message = "Art selection cancelled.".to_string();
             }
+            KeyCode::Char('d') => {
+                // Delete selected art with confirmation
+                if !self.available_pixel_arts.is_empty()
+                    && self.art_selection_index < self.available_pixel_arts.len()
+                {
+                    self.art_to_delete_index = Some(self.art_selection_index);
+                    self.delete_confirmation_selection = false; // Default to "No"
+                    self.input_mode = InputMode::ArtDeleteConfirmation;
+                    let art_name = &self.available_pixel_arts[self.art_selection_index].name;
+                    self.status_message = format!(
+                        "Delete '{}'? Use arrows to select, Enter to confirm.",
+                        art_name
+                    );
+                }
+            }
             KeyCode::Char('q') => self.exit = true,
             _ => {}
         }
@@ -1146,6 +1164,67 @@ impl App {
             KeyCode::Esc => {
                 self.input_mode = InputMode::None;
                 self.status_message = "Share selection cancelled.".to_string();
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_delete_confirmation_input(&mut self, key_code: KeyCode) {
+        match key_code {
+            KeyCode::Left | KeyCode::Right => {
+                // Toggle between Yes and No
+                self.delete_confirmation_selection = !self.delete_confirmation_selection;
+                let selection = if self.delete_confirmation_selection {
+                    "Yes"
+                } else {
+                    "No"
+                };
+                if let Some(index) = self.art_to_delete_index {
+                    let art_name = &self.available_pixel_arts[index].name;
+                    self.status_message = format!("Delete '{}'? Selected: {}", art_name, selection);
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(index) = self.art_to_delete_index {
+                    if self.delete_confirmation_selection {
+                        // User selected "Yes" - delete the art
+                        let art_name = self.available_pixel_arts[index].name.clone();
+
+                        // Delete the actual file
+                        let filename = format!("patterns/{}.json", art_name);
+                        if let Err(e) = std::fs::remove_file(&filename) {
+                            self.status_message =
+                                format!("Failed to delete file '{}': {}", filename, e);
+                        } else {
+                            // Remove from the list
+                            self.available_pixel_arts.remove(index);
+
+                            // Adjust selection index if needed
+                            if self.art_selection_index >= self.available_pixel_arts.len()
+                                && !self.available_pixel_arts.is_empty()
+                            {
+                                self.art_selection_index = self.available_pixel_arts.len() - 1;
+                            }
+
+                            self.status_message = format!("Deleted art '{}'", art_name);
+                        }
+                    } else {
+                        // User selected "No" - cancel deletion
+                        self.status_message = "Deletion cancelled.".to_string();
+                    }
+
+                    // Reset state and return to art selection
+                    self.art_to_delete_index = None;
+                    self.delete_confirmation_selection = false;
+                    self.input_mode = InputMode::ArtSelection;
+                }
+            }
+            KeyCode::Esc => {
+                // Cancel deletion
+                self.art_to_delete_index = None;
+                self.delete_confirmation_selection = false;
+                self.input_mode = InputMode::ArtSelection;
+                self.status_message = "Deletion cancelled.".to_string();
             }
             _ => {}
         }

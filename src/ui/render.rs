@@ -9,7 +9,7 @@ use crate::ui::helpers::{
 };
 use crate::ui::popups::{render_help_popup, render_profile_popup, render_status_log_popup};
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
 pub fn render_ui(app: &mut App, frame: &mut Frame) {
     let main_layout = Layout::default()
@@ -180,6 +180,11 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
         if let Some(selected_art) = app.available_pixel_arts.get(app.art_selection_index) {
             render_art_preview_fullscreen(selected_art, app, frame, frame.size());
         }
+    }
+
+    // If ArtDeleteConfirmation mode is active, render the delete confirmation dialog
+    if app.input_mode == InputMode::ArtDeleteConfirmation {
+        render_delete_confirmation_dialog(app, frame);
     }
 }
 
@@ -556,4 +561,71 @@ fn filter_meaningful_pixels_for_rendering(
     }
 
     meaningful_pixels
+}
+
+fn render_delete_confirmation_dialog(app: &App, frame: &mut Frame) {
+    // Create a centered popup
+    let popup_area = centered_rect(50, 20, frame.size());
+
+    // Clear the area
+    frame.render_widget(Clear, popup_area);
+
+    // Get the art name
+    let art_name = if let Some(index) = app.art_to_delete_index {
+        app.available_pixel_arts
+            .get(index)
+            .map(|art| art.name.as_str())
+            .unwrap_or("Unknown")
+    } else {
+        "Unknown"
+    };
+
+    // Create the dialog content
+    let dialog_text = format!(
+        "Delete '{}'?\n\nThis action cannot be undone.\n\n{}   {}",
+        art_name,
+        if app.delete_confirmation_selection {
+            "> Yes <"
+        } else {
+            "  Yes  "
+        },
+        if !app.delete_confirmation_selection {
+            "> No <"
+        } else {
+            "  No  "
+        }
+    );
+
+    let dialog = Paragraph::new(dialog_text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Confirm Deletion")
+                .border_style(Style::default().fg(Color::Red)),
+        )
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: true });
+
+    frame.render_widget(dialog, popup_area);
+}
+
+/// Helper function to create a centered rectangle
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }

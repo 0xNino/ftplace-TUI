@@ -24,6 +24,7 @@ pub enum InputMode {
     EnterShareMessage,      // New mode for entering share message
     EnterShareString,       // New mode for entering/parsing share strings
     ShareSelection,         // New mode for selecting from received shares
+    ArtDeleteConfirmation,  // New mode for confirming art deletion
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -120,6 +121,10 @@ pub struct App {
     pub share_selection_index: usize,                         // Current selection in shares list
     pub current_share_art: Option<PixelArt>,                  // Art being prepared for sharing
     pub current_share_coords: Option<(i32, i32)>,             // Coordinates for sharing
+
+    // Art deletion confirmation
+    pub delete_confirmation_selection: bool, // true = Yes, false = No (default)
+    pub art_to_delete_index: Option<usize>,  // Index of art to delete
 }
 
 #[derive(Debug)]

@@ -124,6 +124,8 @@ impl App {
             share_selection_index: 0,
             current_share_art: None,
             current_share_coords: None,
+            delete_confirmation_selection: false, // Default to "No"
+            art_to_delete_index: None,
         };
 
         // Load saved queue

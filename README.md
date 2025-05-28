@@ -116,8 +116,10 @@ The application will guide you through initial setup:
 | `l`     | Load/select pixel art                    |
 | `e`     | Create new pixel art                     |
 | `↑↓←→`  | Position loaded art (when art is loaded) |
-| `Enter` | Add positioned art to queue              |
-| `Esc`   | Cancel loaded art or queue processing    |
+| `Enter` | Load selected art for positioning        |
+| `Space` | Preview selected art full-screen         |
+| `d`     | Delete selected art (with confirmation)  |
+| `Esc`   | Cancel art selection                     |
 
 ### Queue Management
 
