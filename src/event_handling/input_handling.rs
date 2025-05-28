@@ -853,19 +853,6 @@ impl App {
                     );
                 }
             }
-            KeyCode::Char(' ') => {
-                // Show full-screen preview of selected art
-                if let Some(selected_art) = self
-                    .available_pixel_arts
-                    .get(self.art_selection_index)
-                    .cloned()
-                {
-                    self.art_preview_art = Some(selected_art);
-                    self.input_mode = InputMode::ArtPreview;
-                    self.status_message =
-                        "Full-screen art preview. Press Esc to return to selection.".to_string();
-                }
-            }
             KeyCode::Esc => {
                 self.input_mode = InputMode::None;
                 self.status_message = "Art selection cancelled.".to_string();

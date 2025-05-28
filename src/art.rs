@@ -54,7 +54,7 @@ fn is_zero(value: &i32) -> bool {
 // Swiss flag as the default pixel art
 pub fn load_default_pixel_art() -> PixelArt {
     PixelArt {
-        name: "Swiss".to_string(),
+        name: "Swiss (default)".to_string(),
         width: 5, // 5x5 Swiss flag
         height: 5,
         pattern: vec![

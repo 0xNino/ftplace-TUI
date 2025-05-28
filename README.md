@@ -117,7 +117,6 @@ The application will guide you through initial setup:
 | `e`     | Create new pixel art                     |
 | `↑↓←→`  | Position loaded art (when art is loaded) |
 | `Enter` | Load selected art for positioning        |
-| `Space` | Preview selected art full-screen         |
 | `d`     | Delete selected art (with confirmation)  |
 | `Esc`   | Cancel art selection                     |
 
