@@ -995,7 +995,31 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                // Start queue processing
+                // Check if we have a selected item and it's failed - allow resuming it
+                if !self.art_queue.is_empty() && self.queue_selection_index < self.art_queue.len() {
+                    let is_failed = self.art_queue[self.queue_selection_index].status
+                        == crate::app_state::QueueStatus::Failed;
+
+                    if is_failed {
+                        // Resume failed item by resetting to pending
+                        let art_name = self.art_queue[self.queue_selection_index].art.name.clone();
+                        self.art_queue[self.queue_selection_index].status =
+                            crate::app_state::QueueStatus::Pending;
+                        let _ = self.save_queue(); // Auto-save after status change
+
+                        // Automatically start queue processing after resuming
+                        self.input_mode = InputMode::None;
+                        self.trigger_queue_processing();
+
+                        self.status_message = format!(
+                            "Resumed failed item '{}' and started queue processing.",
+                            art_name
+                        );
+                        return Ok(());
+                    }
+                }
+
+                // Start queue processing for all pending items
                 if !self.art_queue.is_empty() {
                     self.input_mode = InputMode::None;
                     self.trigger_queue_processing();

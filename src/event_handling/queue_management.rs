@@ -106,6 +106,14 @@ impl App {
                     art_name,
                     error_msg
                 ));
+
+                // Reset queue processing state when an item fails
+                // This allows the queue to be restarted
+                self.queue_processing = false;
+                self.queue_processing_start = None;
+                self.queue_receiver = None;
+                self.queue_control_sender = None;
+                self.queue_paused = false;
             }
             QueueUpdate::ItemSkipped {
                 item_index,

@@ -177,7 +177,7 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
         .map(|item| item.pixels_total)
         .sum::<usize>();
 
-    let controls_text = vec![
+    let mut controls_text = vec![
         Line::from(Span::styled(
             "Queue Statistics",
             Style::default().add_modifier(Modifier::BOLD),
@@ -185,6 +185,23 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
         Line::from(format!("Pending: {}", pending_count)),
         Line::from(format!("Paused: {}", paused_count)),
         Line::from(format!("Total Pixels: {}", total_pixels)),
+    ];
+
+    // Add hint if selected item is failed
+    if !app.art_queue.is_empty() && app.queue_selection_index < app.art_queue.len() {
+        let selected_item = &app.art_queue[app.queue_selection_index];
+        if selected_item.status == crate::app_state::QueueStatus::Failed {
+            controls_text.push(Line::from(""));
+            controls_text.push(Line::from(Span::styled(
+                "💡 Selected item failed - Press Enter to resume & start",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )));
+        }
+    }
+
+    controls_text.extend(vec![
         Line::from(""),
         Line::from(Span::styled(
             "Controls",
@@ -193,7 +210,7 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
         Line::from("↑/↓  : Navigate queue"),
         Line::from("u/k  : Move item up"),
         Line::from("j/n  : Move item down"),
-        Line::from("Enter: Start processing"),
+        Line::from("Enter: Resume failed/Start processing"),
         Line::from("Space: Pause/Resume queue"),
         Line::from("p/s  : Pause/Resume item"),
         Line::from("1-5  : Set priority"),
@@ -215,7 +232,7 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
             Span::styled("4-Low+ ", Style::default().fg(Color::Green)),
             Span::styled("5-Low ", Style::default().fg(Color::Blue)),
         ]),
-    ];
+    ]);
 
     let controls_paragraph = Paragraph::new(controls_text)
         .block(
