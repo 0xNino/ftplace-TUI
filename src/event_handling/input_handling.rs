@@ -563,6 +563,8 @@ impl App {
                 KeyCode::Char('w') => {
                     // Open work queue management
                     self.input_mode = InputMode::ArtQueue;
+                    // Recalculate queue totals to ensure pixel counts are up-to-date
+                    self.recalculate_queue_totals();
                     // Center viewport on the first queue item if queue is not empty
                     if !self.art_queue.is_empty() {
                         self.center_viewport_on_selected_queue_item();

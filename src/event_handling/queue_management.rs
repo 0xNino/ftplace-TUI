@@ -123,6 +123,12 @@ impl App {
                 // Update the queue item status in our local queue
                 if let Some(item) = self.art_queue.get_mut(item_index) {
                     item.status = QueueStatus::Skipped;
+
+                    // If skipped because all pixels are already correct,
+                    // set pixels_placed to pixels_total for proper display (e.g., 4/4)
+                    if reason.contains("already correct") {
+                        item.pixels_placed = item.pixels_total;
+                    }
                 }
 
                 self.add_status_message(format!(
@@ -954,6 +960,8 @@ impl App {
             // If all pixels are now correct, mark as complete
             if pixels_already_correct == meaningful_pixels.len() {
                 item.status = QueueStatus::Complete;
+                // Set pixels_placed to total for proper display (e.g., 4/4)
+                item.pixels_placed = item.pixels_total;
             }
         }
     }
