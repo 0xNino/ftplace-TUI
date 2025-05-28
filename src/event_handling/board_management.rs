@@ -86,6 +86,9 @@ impl App {
                 self.last_board_refresh = Some(Instant::now());
                 if !self.initial_board_fetched {
                     self.initial_board_fetched = true;
+
+                    // Automatically fetch profile on initial board load
+                    self.trigger_profile_fetch();
                 }
 
                 // Recalculate queue totals now that we have updated board data
@@ -178,6 +181,9 @@ impl App {
                 self.last_board_refresh = Some(Instant::now());
                 if !self.initial_board_fetched {
                     self.initial_board_fetched = true;
+
+                    // Automatically fetch profile on initial board load
+                    self.trigger_profile_fetch();
                 }
 
                 // Recalculate queue totals now that we have updated board data
