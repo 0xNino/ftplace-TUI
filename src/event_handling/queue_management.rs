@@ -1448,6 +1448,39 @@ impl App {
                 "Invalid share string format. Expected: ftplace-share: NAME at (X, Y)".to_string();
         }
     }
+
+    /// Center viewport on the currently selected queue item
+    pub fn center_viewport_on_selected_queue_item(&mut self) {
+        if self.queue_selection_index >= self.art_queue.len() {
+            return; // Invalid selection index
+        }
+
+        let selected_art = &self.art_queue[self.queue_selection_index].art;
+
+        // Get art dimensions to center it properly
+        let art_dimensions = crate::art::get_art_dimensions(selected_art);
+        let art_center_x = selected_art.board_x + art_dimensions.0 / 2;
+        let art_center_y = selected_art.board_y + art_dimensions.1 / 2;
+
+        // Center the viewport on the art (with some padding)
+        if let Some((_, _, board_width, board_height)) = self.board_area_bounds {
+            // Calculate viewport position to center the art
+            let viewport_x = (art_center_x - (board_width as i32 / 2)).max(0) as u16;
+            let viewport_y = (art_center_y - (board_height as i32)).max(0) as u16; // *2 for half-blocks
+
+            self.board_viewport_x = viewport_x;
+            self.board_viewport_y = viewport_y;
+        } else {
+            // Fallback if board bounds not available
+            self.board_viewport_x = (selected_art.board_x - 25).max(0) as u16;
+            self.board_viewport_y = (selected_art.board_y - 15).max(0) as u16;
+        }
+
+        self.status_message = format!(
+            "Centered viewport on '{}' at ({}, {})",
+            selected_art.name, selected_art.board_x, selected_art.board_y
+        );
+    }
 }
 
 /// Calculate how long to wait before we can place a pixel based on user timers and buffer

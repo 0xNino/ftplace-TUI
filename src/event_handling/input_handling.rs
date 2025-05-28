@@ -222,13 +222,16 @@ impl App {
                             // Add art to queue and start processing
                             self.add_art_to_queue(art_clone).await;
 
+                            // Clear loaded art so user exits positioning mode
+                            self.loaded_art = None;
+
                             // Start queue processing immediately
                             if !self.queue_processing {
                                 self.trigger_queue_processing();
                             }
 
                             self.status_message = format!(
-                                "Art '{}' placed at ({}, {}) via right-click.",
+                                "Art '{}' placed at ({}, {}) via right-click. Queue processing started.",
                                 art_name, board_pixel_x, board_pixel_y
                             );
                         } else {
@@ -497,13 +500,24 @@ impl App {
                 KeyCode::Enter => {
                     // Add loaded art to queue and start processing
                     if let Some(art) = &self.loaded_art {
+                        let art_name = art.name.clone();
+                        let art_position = (art.board_x, art.board_y);
+
                         // Add art to queue at current position
                         self.add_art_to_queue(art.clone()).await;
+
+                        // Clear loaded art so user exits positioning mode
+                        self.loaded_art = None;
 
                         // Start queue processing immediately
                         if !self.queue_processing {
                             self.trigger_queue_processing();
                         }
+
+                        self.status_message = format!(
+                            "Added '{}' to queue at ({}, {}). Queue processing started.",
+                            art_name, art_position.0, art_position.1
+                        );
                     } else {
                         self.status_message = "No art loaded to place.".to_string();
                     }
@@ -596,6 +610,10 @@ impl App {
                 KeyCode::Char('w') => {
                     // Open work queue management
                     self.input_mode = InputMode::ArtQueue;
+                    // Center viewport on the first queue item if queue is not empty
+                    if !self.art_queue.is_empty() {
+                        self.center_viewport_on_selected_queue_item();
+                    }
                     self.status_message =
                         "Work Queue Management. Use arrows to navigate, Enter to start processing."
                             .to_string();
@@ -956,11 +974,15 @@ impl App {
             KeyCode::Up => {
                 if self.queue_selection_index > 0 {
                     self.queue_selection_index -= 1;
+                    // Center viewport on the newly selected queue item
+                    self.center_viewport_on_selected_queue_item();
                 }
             }
             KeyCode::Down => {
                 if self.queue_selection_index < self.art_queue.len().saturating_sub(1) {
                     self.queue_selection_index += 1;
+                    // Center viewport on the newly selected queue item
+                    self.center_viewport_on_selected_queue_item();
                 }
             }
             KeyCode::Char('u') | KeyCode::Char('k') => {
@@ -973,6 +995,8 @@ impl App {
                         .swap(self.queue_selection_index - 1, self.queue_selection_index);
                     self.queue_selection_index -= 1;
                     let _ = self.save_queue(); // Auto-save after reordering
+                                               // Center viewport on the moved item
+                    self.center_viewport_on_selected_queue_item();
                     self.status_message = format!(
                         "Moved '{}' up in queue",
                         self.art_queue[self.queue_selection_index].art.name
@@ -988,6 +1012,8 @@ impl App {
                         .swap(self.queue_selection_index, self.queue_selection_index + 1);
                     self.queue_selection_index += 1;
                     let _ = self.save_queue(); // Auto-save after reordering
+                                               // Center viewport on the moved item
+                    self.center_viewport_on_selected_queue_item();
                     self.status_message = format!(
                         "Moved '{}' down in queue",
                         self.art_queue[self.queue_selection_index].art.name
@@ -1045,6 +1071,10 @@ impl App {
                         && !self.art_queue.is_empty()
                     {
                         self.queue_selection_index = self.art_queue.len() - 1;
+                    }
+                    // Center viewport on the newly selected item if queue is not empty
+                    if !self.art_queue.is_empty() {
+                        self.center_viewport_on_selected_queue_item();
                     }
                 }
             }

@@ -116,18 +116,20 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
         }
         _ => {
             // For InputMode::None or ArtEditor modes, show current config (simplified)
-            let mut display_text =
-                format!("Base: {}", app.api_client.get_base_url_config_display());
+            let mut display_text = format!("URL: {}", app.api_client.get_base_url_config_display());
             if let Some(token_preview) = app.api_client.get_auth_cookie_preview() {
                 display_text.push_str(&format!("; Token: [{}...]", token_preview));
             } else {
                 display_text.push_str("; Token: [not set]");
             }
-            let config_display_widget = Paragraph::new(display_text).block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Current Config (b to edit Base URL, c to edit AccessToken)"),
-            );
+
+            // Add shortcuts help on a new line
+            display_text.push_str("\n\nq: Quit | ?: Help | c: Config Token | r: Refresh | p: Profile | h: History | w: Queue | l: Load Art");
+
+            let config_display_widget =
+                Paragraph::new(display_text).block(Block::default().borders(Borders::ALL).title(
+                    "Current Config & Shortcuts (b to edit Base URL, c to edit AccessToken)",
+                ));
             frame.render_widget(config_display_widget, input_area_rect);
         }
     }
