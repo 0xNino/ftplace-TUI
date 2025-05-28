@@ -173,70 +173,23 @@ impl App {
                             self.board_viewport_y as i32 + (screen_cell_y as i32 * 2);
 
                         if let Some(art) = &mut self.loaded_art {
-                            // Update loaded art position
-                            art.board_x = board_pixel_x;
-                            art.board_y = board_pixel_y;
+                            // Get art dimensions to center it under the mouse cursor
+                            let art_dimensions = crate::art::get_art_dimensions(art);
+                            let art_center_offset_x = art_dimensions.0 / 2;
+                            let art_center_offset_y = art_dimensions.1 / 2;
+
+                            // Position art so its center is under the mouse cursor
+                            art.board_x = board_pixel_x - art_center_offset_x;
+                            art.board_y = board_pixel_y - art_center_offset_y;
+
                             self.status_message = format!(
-                                "Art '{}' moved to ({}, {}) via mouse. Press Enter to place.",
+                                "Art '{}' centered at ({}, {}) via mouse. Press Enter to place.",
                                 art.name, art.board_x, art.board_y
                             );
                         } else {
                             // No art loaded - show coordinates for reference
                             self.status_message = format!(
                                 "Clicked at board position ({}, {}). Load art with 'l' to place here.",
-                                board_pixel_x, board_pixel_y
-                            );
-                        }
-                    }
-                }
-            }
-            MouseEventKind::Down(MouseButton::Right) => {
-                // Right click to place art immediately (only if art is loaded)
-                if let Some((board_x, board_y, board_width, board_height)) = self.board_area_bounds
-                {
-                    let mouse_x = mouse_event.column;
-                    let mouse_y = mouse_event.row;
-
-                    // Check if click is within board area
-                    if mouse_x >= board_x
-                        && mouse_x < board_x + board_width
-                        && mouse_y >= board_y
-                        && mouse_y < board_y + board_height
-                    {
-                        // Convert screen coordinates to board pixel coordinates
-                        let screen_cell_x = mouse_x - board_x;
-                        let screen_cell_y = mouse_y - board_y;
-
-                        let board_pixel_x = self.board_viewport_x as i32 + screen_cell_x as i32;
-                        let board_pixel_y =
-                            self.board_viewport_y as i32 + (screen_cell_y as i32 * 2);
-
-                        if let Some(art) = &mut self.loaded_art {
-                            // Update loaded art position and place immediately
-                            art.board_x = board_pixel_x;
-                            art.board_y = board_pixel_y;
-
-                            let art_clone = art.clone();
-                            let art_name = art.name.clone();
-
-                            // Add art to queue and start processing
-                            self.add_art_to_queue(art_clone).await;
-
-                            // Clear loaded art so user exits positioning mode
-                            self.loaded_art = None;
-
-                            // Start queue processing immediately
-                            if !self.queue_processing {
-                                self.trigger_queue_processing();
-                            }
-
-                            self.status_message = format!(
-                                "Art '{}' placed at ({}, {}) via right-click. Queue processing started.",
-                                art_name, board_pixel_x, board_pixel_y
-                            );
-                        } else {
-                            self.status_message = format!(
-                                "Right-clicked at ({}, {}). Load art with 'l' first to place.",
                                 board_pixel_x, board_pixel_y
                             );
                         }
