@@ -393,10 +393,7 @@ impl ApiClient {
     pub async fn get_profile(&mut self) -> Result<ProfileGetResponse, ApiError> {
         self.send_request_with_retry(|s| {
             let url = format!("{}/api/profile", s.base_url);
-            let mut request_builder = s
-                .client
-                .get(&url)
-                .header(reqwest::header::ACCEPT, "application/json");
+            let mut request_builder = s.client.get(&url);
             let mut cookie_parts = Vec::new();
             if let Some(token) = &s.access_token {
                 cookie_parts.push(format!("token={}", token));
