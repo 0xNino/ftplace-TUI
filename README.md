@@ -121,11 +121,10 @@ The application will guide you through initial setup:
 
 ### Queue Management
 
-| Key     | Action                               |
-| ------- | ------------------------------------ |
-| `w`     | Open work queue management           |
-| `Space` | Toggle queue pause/resume            |
-| `s`     | Toggle pause for selected queue item |
+| Key | Action                                      |
+| --- | ------------------------------------------- |
+| `w` | Open work queue management                  |
+| `s` | Toggle pause/resume for selected queue item |
 
 ### Art Editor
 

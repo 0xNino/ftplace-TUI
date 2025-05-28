@@ -573,12 +573,8 @@ impl App {
                         "Work Queue Management. Use arrows to navigate, Enter to start processing."
                             .to_string();
                 }
-                KeyCode::Char(' ') => {
-                    // Toggle queue pause/resume
-                    self.toggle_queue_pause();
-                }
                 KeyCode::Char('s') => {
-                    // Toggle pause/resume for selected queue item (s for suspend/start)
+                    // Toggle pause/resume for selected queue item
                     self.toggle_selected_queue_item_pause();
                 }
                 KeyCode::Char('x') => {
@@ -1072,11 +1068,7 @@ impl App {
                         "No pixel arts available. Create some first with 'e'.".to_string();
                 }
             }
-            KeyCode::Char(' ') => {
-                // Toggle queue pause/resume
-                self.toggle_queue_pause();
-            }
-            KeyCode::Char('p') | KeyCode::Char('s') => {
+            KeyCode::Char('s') => {
                 // Toggle pause/resume for selected queue item
                 self.toggle_selected_queue_item_pause();
             }

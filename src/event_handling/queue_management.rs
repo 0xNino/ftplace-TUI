@@ -181,7 +181,7 @@ impl App {
             } => {
                 self.queue_paused = true;
                 self.add_status_message(format!(
-                    "⏸️ Queue paused at item {}: '{}' - {}/{} pixels placed. Press 'space' to resume.",
+                    "⏸️ Queue paused at item {}: '{}' - {}/{} pixels placed. Press Esc to cancel.",
                     item_index + 1,
                     art_name,
                     pixels_placed,
@@ -339,29 +339,12 @@ impl App {
             let mut processed_count = 0;
             let mut total_pixels_placed = 0;
             let start_time = Instant::now();
-            let mut is_paused = false;
             let mut control_rx = control_rx; // Make it mutable
 
             for (original_index, queue_item) in queue_items {
-                // Check for pause/resume commands
+                // Check for cancel commands
                 while let Ok(control_cmd) = control_rx.try_recv() {
                     match control_cmd {
-                        crate::app_state::QueueControl::Pause => {
-                            is_paused = true;
-                            let _ = tx.send(QueueUpdate::QueuePaused {
-                                item_index: original_index,
-                                art_name: queue_item.art.name.clone(),
-                                pixels_placed: 0,
-                                total_pixels: 0,
-                            });
-                        }
-                        crate::app_state::QueueControl::Resume => {
-                            is_paused = false;
-                            let _ = tx.send(QueueUpdate::QueueResumed {
-                                item_index: original_index,
-                                art_name: queue_item.art.name.clone(),
-                            });
-                        }
                         crate::app_state::QueueControl::Cancel => {
                             let _ = tx.send(QueueUpdate::QueueCancelled {
                                 items_processed: processed_count,
@@ -372,27 +355,15 @@ impl App {
                     }
                 }
 
-                // Wait while paused
-                while is_paused {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    // Check for resume command
-                    while let Ok(control_cmd) = control_rx.try_recv() {
-                        match control_cmd {
-                            crate::app_state::QueueControl::Resume => {
-                                is_paused = false;
-                                let _ = tx.send(QueueUpdate::QueueResumed {
-                                    item_index: original_index,
-                                    art_name: queue_item.art.name.clone(),
-                                });
-                            }
-                            crate::app_state::QueueControl::Cancel => {
-                                let _ = tx.send(QueueUpdate::QueueCancelled {
-                                    items_processed: processed_count,
-                                    total_pixels_placed,
-                                });
-                                return;
-                            }
-                            _ => {}
+                // Check for cancel command during processing
+                while let Ok(control_cmd) = control_rx.try_recv() {
+                    match control_cmd {
+                        crate::app_state::QueueControl::Cancel => {
+                            let _ = tx.send(QueueUpdate::QueueCancelled {
+                                items_processed: processed_count,
+                                total_pixels_placed,
+                            });
+                            return;
                         }
                     }
                 }
@@ -797,71 +768,6 @@ impl App {
                 duration_secs,
             });
         });
-    }
-
-    /// Pause queue processing
-    pub fn pause_queue(&mut self) {
-        if !self.queue_processing {
-            self.status_message = "No queue processing to pause.".to_string();
-            return;
-        }
-
-        if self.queue_paused {
-            self.status_message = "Queue is already paused.".to_string();
-            return;
-        }
-
-        // Send pause command to background task
-        if let Some(sender) = &self.queue_control_sender {
-            if sender.send(crate::app_state::QueueControl::Pause).is_ok() {
-                self.queue_paused = true;
-                self.status_message =
-                    "Queue processing paused. Press 'space' to resume.".to_string();
-            } else {
-                self.status_message = "Failed to pause queue processing.".to_string();
-            }
-        } else {
-            self.status_message = "No queue control channel available.".to_string();
-        }
-    }
-
-    /// Resume queue processing
-    pub fn resume_queue(&mut self) {
-        if !self.queue_processing {
-            self.status_message = "No queue processing to resume.".to_string();
-            return;
-        }
-
-        if !self.queue_paused {
-            self.status_message = "Queue is not paused.".to_string();
-            return;
-        }
-
-        // Send resume command to background task
-        if let Some(sender) = &self.queue_control_sender {
-            if sender.send(crate::app_state::QueueControl::Resume).is_ok() {
-                self.queue_paused = false;
-                self.status_message = "Queue processing resumed.".to_string();
-            } else {
-                self.status_message = "Failed to resume queue processing.".to_string();
-            }
-        } else {
-            self.status_message = "No queue control channel available.".to_string();
-        }
-    }
-
-    /// Toggle queue pause/resume
-    pub fn toggle_queue_pause(&mut self) {
-        if !self.queue_processing {
-            self.status_message = "No queue processing active.".to_string();
-            return;
-        }
-
-        if self.queue_paused {
-            self.resume_queue();
-        } else {
-            self.pause_queue();
-        }
     }
 
     /// Pause individual queue item

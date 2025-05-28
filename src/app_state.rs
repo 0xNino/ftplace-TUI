@@ -223,7 +223,5 @@ pub enum ProfileFetchResult {
 
 #[derive(Debug, Clone)]
 pub enum QueueControl {
-    Pause,
-    Resume,
     Cancel,
 }

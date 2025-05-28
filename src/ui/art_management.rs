@@ -66,8 +66,6 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
     if app.art_queue.is_empty() {
         let empty_message = Paragraph::new(vec![
             Line::from("Queue is empty"),
-            Line::from(""),
-            Line::from("Controls:"),
             Line::from("  l : Open art selection to add arts to queue"),
             Line::from("  Esc : Return to main view"),
         ])
@@ -211,7 +209,6 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
         Line::from("u/k  : Move item up"),
         Line::from("j/n  : Move item down"),
         Line::from("Enter: Resume failed/Start processing"),
-        Line::from("Space: Pause/Resume queue"),
         Line::from("p/s  : Pause/Resume item"),
         Line::from("1-5  : Set priority"),
         Line::from("d/Del: Remove item"),
