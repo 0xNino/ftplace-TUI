@@ -22,6 +22,7 @@ pub fn render_help_popup(_app: &App, frame: &mut Frame) {
         Line::from(" w: Work queue management"),
         Line::from(" x: Share loaded art with coordinates"),
         Line::from(" v: View/import shared arts"),
+        Line::from(" V: Toggle periodic validation (monitor completed arts)"),
         Line::from(" z: Enter share string for quick positioning"),
         Line::from(" Arrows: Scroll board viewport"),
         Line::from(" Mouse Wheel: Scroll board viewport vertically"),

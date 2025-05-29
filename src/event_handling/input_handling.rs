@@ -54,6 +54,13 @@ impl App {
             }
         }
 
+        // Check for validation updates
+        if let Some(receiver) = &mut self.validation_receiver {
+            if let Ok(update) = receiver.try_recv() {
+                self.handle_validation_update(update);
+            }
+        }
+
         let mut should_refresh_board = false;
         if (self.input_mode == InputMode::None || self.input_mode == InputMode::ShowStatusLog)
             && self.initial_board_fetched
@@ -650,6 +657,10 @@ impl App {
                 KeyCode::Char('v') => {
                     // View/import shared arts
                     self.open_share_selection();
+                }
+                KeyCode::Char('V') => {
+                    // Toggle periodic validation of completed queue items
+                    self.toggle_validation();
                 }
                 KeyCode::Char('z') => {
                     // Enter share string for quick coordinate sharing

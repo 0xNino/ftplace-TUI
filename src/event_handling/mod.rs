@@ -6,3 +6,4 @@ pub mod helpers;
 pub mod input_handling;
 pub mod profile_management;
 pub mod queue_management;
+pub mod validation;

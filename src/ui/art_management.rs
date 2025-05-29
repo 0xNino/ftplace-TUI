@@ -244,6 +244,27 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
         )));
     }
 
+    // Add validation status
+    if app.validation_enabled {
+        let status_text = if let Some(last_validation) = app.last_validation_time {
+            let minutes_ago = last_validation.elapsed().as_secs() / 60;
+            format!("🔍 Validation: ON (last check {}min ago)", minutes_ago)
+        } else {
+            "🔍 Validation: ON (starting...)".to_string()
+        };
+        controls_text.push(Line::from(Span::styled(
+            status_text,
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )));
+    } else {
+        controls_text.push(Line::from(Span::styled(
+            "🔍 Validation: OFF (press 'V' to enable)",
+            Style::default().fg(Color::Gray),
+        )));
+    }
+
     // Add hint if selected item is failed
     if !app.art_queue.is_empty() && app.queue_selection_index < app.art_queue.len() {
         let selected_item = &app.art_queue[app.queue_selection_index];

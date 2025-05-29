@@ -131,6 +131,10 @@ impl App {
             event_end_time: None,
             waiting_for_event: false,
             last_event_check_time: None,
+            validation_receiver: None,
+            validation_control_sender: None,
+            validation_enabled: false,
+            last_validation_time: None,
         };
 
         // Load saved queue

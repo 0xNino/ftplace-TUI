@@ -131,6 +131,12 @@ pub struct App {
     pub event_end_time: Option<std::time::SystemTime>,   // When the current event ends (UTC)
     pub waiting_for_event: bool, // Whether we're currently waiting for an event to start
     pub last_event_check_time: Option<Instant>, // Last time we checked event status
+
+    // Periodic re-validation for completed queue items
+    pub validation_receiver: Option<mpsc::UnboundedReceiver<ValidationUpdate>>, // Channel for receiving validation updates
+    pub validation_control_sender: Option<mpsc::UnboundedSender<ValidationControl>>, // Channel for controlling validation task
+    pub validation_enabled: bool, // Whether periodic validation is enabled
+    pub last_validation_time: Option<Instant>, // Last time validation ran
 }
 
 #[derive(Debug)]
@@ -240,4 +246,28 @@ pub enum ProfileFetchResult {
 #[derive(Debug, Clone)]
 pub enum QueueControl {
     Cancel,
+}
+
+#[derive(Debug, Clone)]
+pub enum ValidationUpdate {
+    ItemValidated {
+        item_index: usize,
+        art_name: String,
+        pixels_correct: usize,
+        pixels_total: usize,
+        needs_requeue: bool,
+    },
+    ValidationCycle {
+        completed_items_checked: usize,
+        items_requeued: usize,
+        next_check_in_seconds: u64,
+    },
+    ValidationError {
+        error_msg: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum ValidationControl {
+    Stop,
 }

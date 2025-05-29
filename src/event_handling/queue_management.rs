@@ -155,6 +155,21 @@ impl App {
                 self.queue_processing_start = None;
                 self.queue_receiver = None;
 
+                // Auto-start validation if there are completed items and validation is not already enabled
+                let completed_count = self
+                    .art_queue
+                    .iter()
+                    .filter(|item| item.status == QueueStatus::Complete)
+                    .count();
+
+                if completed_count > 0 && !self.validation_enabled {
+                    self.add_status_message(format!(
+                        "🔍 Auto-starting validation to monitor {} completed items. Use 'V' to toggle.",
+                        completed_count
+                    ));
+                    self.start_validation();
+                }
+
                 // Trigger board refresh to show results
                 self.trigger_board_fetch();
             }
