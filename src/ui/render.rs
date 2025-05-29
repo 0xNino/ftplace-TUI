@@ -142,7 +142,10 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
         }
     }
 
-    // --- Board Display Area or Art Editor Area (main_layout[1]) ---
+    // Check if terminal is wide enough for side-by-side layout
+    let use_wide_layout = frame.size().width >= 120;
+
+    // --- Main Content Area (main_layout[1]) ---
     match app.input_mode {
         InputMode::ArtEditor => {
             render_art_editor_ui(app, frame, main_layout[1]);
@@ -152,12 +155,17 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
             // This will be handled after the status area rendering
         }
         _ => {
-            // Includes EnterBaseUrl, EnterCustomBaseUrlText, EnterAccessToken, EnterRefreshToken, None
-            render_board_display(app, frame, main_layout[1]);
+            if use_wide_layout {
+                // Wide layout: Board on left (75%), Log history on right (25%)
+                render_wide_layout(app, frame, main_layout[1], main_layout[2]);
+            } else {
+                // Standard layout: Board in center, status at bottom
+                render_board_display(app, frame, main_layout[1]);
+            }
         }
     }
 
-    // --- Status Message Area (main_layout[2]) ---
+    // --- Status Message Area (main_layout[2]) - Always render the status area ---
     render_status_area(app, frame, main_layout[2]);
 
     // Cursor handling is now within specific input mode rendering logic above for text input
@@ -337,6 +345,251 @@ fn render_board_display(app: &mut App, frame: &mut Frame, area: Rect) {
     if app.waiting_for_event {
         render_event_timer_overlay(app, frame, &drawable_board_area);
     }
+}
+
+fn render_wide_layout(app: &mut App, frame: &mut Frame, content_area: Rect, _status_area: Rect) {
+    // Create horizontal layout: Board on left (75%), Log history on right (25%)
+    let wide_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(80), // Board area - increased from 60%
+            Constraint::Percentage(20), // Log history area - reduced from 40%
+        ])
+        .split(content_area);
+
+    let board_area = wide_layout[0];
+    let log_area = wide_layout[1];
+
+    // Render board on the left (left-aligned instead of centered)
+    render_board_display_left_aligned(app, frame, board_area);
+
+    // Render log history on the right
+    render_log_history_panel(app, frame, log_area);
+}
+
+fn render_board_display_left_aligned(app: &mut App, frame: &mut Frame, area: Rect) {
+    // Similar to render_board_display but left-aligned instead of centered
+    let inner_board_area = area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+
+    // Get actual board dimensions
+    let board_pixel_width = app.board.len();
+    let board_pixel_height = if board_pixel_width > 0 {
+        app.board[0].len()
+    } else {
+        0
+    };
+
+    // Calculate how much terminal space the actual board needs
+    let board_terminal_width = board_pixel_width as u16;
+    let board_terminal_height = (board_pixel_height as u16 + 1) / 2; // Each terminal row shows 2 pixels
+
+    // Left-align the board (no centering offset)
+    let board_offset_x = 0;
+    let board_offset_y = if board_terminal_height < inner_board_area.height {
+        (inner_board_area.height - board_terminal_height) / 2
+    } else {
+        0
+    };
+
+    // Calculate the actual drawable board area (left-aligned within inner_board_area)
+    let drawable_board_area = Rect {
+        x: inner_board_area.x + board_offset_x,
+        y: inner_board_area.y + board_offset_y,
+        width: board_terminal_width.min(inner_board_area.width),
+        height: board_terminal_height.min(inner_board_area.height),
+    };
+
+    // Store the board area bounds for mouse coordinate conversion
+    app.board_area_bounds = Some((
+        drawable_board_area.x,
+        drawable_board_area.y,
+        drawable_board_area.width,
+        drawable_board_area.height,
+    ));
+
+    let board_title = if app.board_loading {
+        let elapsed = app
+            .board_load_start
+            .map(|start| start.elapsed().as_secs())
+            .unwrap_or(0);
+        format!(
+            "Board Display - Loading... ({}s) - Size {}x{}",
+            elapsed, board_pixel_width, board_pixel_height
+        )
+    } else {
+        format!(
+            "Board Display (Viewport @ {},{} - Size {}x{})",
+            app.board_viewport_x, app.board_viewport_y, board_pixel_width, board_pixel_height
+        )
+    };
+
+    let board_block = Block::default().borders(Borders::ALL).title(board_title);
+    frame.render_widget(board_block, area);
+
+    // Clamp viewport coordinates to board bounds
+    if board_pixel_height > (drawable_board_area.height * 2) as usize {
+        let max_scroll_y_pixels =
+            (board_pixel_height - (drawable_board_area.height * 2) as usize) as u16;
+        app.board_viewport_y = app.board_viewport_y.min(max_scroll_y_pixels);
+    } else {
+        app.board_viewport_y = 0;
+    }
+    if board_pixel_width > drawable_board_area.width as usize {
+        let max_scroll_x_pixels = (board_pixel_width - drawable_board_area.width as usize) as u16;
+        app.board_viewport_x = app.board_viewport_x.min(max_scroll_x_pixels);
+    } else {
+        app.board_viewport_x = 0;
+    }
+
+    let default_board_color_info = app.colors.iter().find(|c| c.id == 1);
+    let default_board_rgb =
+        default_board_color_info.map_or(Color::Black, |ci| Color::Rgb(ci.red, ci.green, ci.blue));
+
+    // Render only the actual board pixels within the left-aligned area
+    if !app.board.is_empty() && !app.colors.is_empty() {
+        for y_screen_cell in 0..drawable_board_area.height {
+            for x_screen_cell in 0..drawable_board_area.width {
+                let board_px_x = app.board_viewport_x as usize + x_screen_cell as usize;
+                let board_px_y_top = app.board_viewport_y as usize + (y_screen_cell * 2) as usize;
+                let board_px_y_bottom = board_px_y_top + 1;
+
+                // Only render if within actual board bounds
+                if board_px_x < board_pixel_width && board_px_y_top < board_pixel_height {
+                    let top_pixel_color = app.board[board_px_x][board_px_y_top]
+                        .as_ref()
+                        .map_or(default_board_rgb, |p| {
+                            get_ratatui_color(app, p.c, default_board_rgb)
+                        });
+
+                    let bottom_pixel_color = if board_px_y_bottom < board_pixel_height {
+                        app.board[board_px_x][board_px_y_bottom]
+                            .as_ref()
+                            .map_or(default_board_rgb, |p| {
+                                get_ratatui_color(app, p.c, default_board_rgb)
+                            })
+                    } else {
+                        default_board_rgb // Bottom half is out of bounds
+                    };
+
+                    let cell_char = '▀';
+                    let style = Style::default().fg(top_pixel_color).bg(bottom_pixel_color);
+
+                    frame
+                        .buffer_mut()
+                        .get_mut(
+                            drawable_board_area.x + x_screen_cell,
+                            drawable_board_area.y + y_screen_cell,
+                        )
+                        .set_char(cell_char)
+                        .set_style(style);
+                }
+            }
+        }
+    }
+
+    // Overlay loaded_art if present
+    if let Some(art) = &app.loaded_art {
+        render_loaded_art_overlay(app, frame, &drawable_board_area, art);
+    }
+
+    // Overlay queue previews with progress-aware visual feedback
+    if !app.art_queue.is_empty() {
+        render_queue_overlay(app, frame, &drawable_board_area);
+    }
+
+    // Render event timer overlay if waiting for event
+    if app.waiting_for_event {
+        render_event_timer_overlay(app, frame, &drawable_board_area);
+    }
+}
+
+fn render_log_history_panel(app: &App, frame: &mut Frame, area: Rect) {
+    // Build log history content similar to render_status_area but focused on history
+    let mut log_lines = Vec::new();
+    let max_lines = (area.height.saturating_sub(2)) as usize; // Account for borders
+
+    // Add timer status as sticky header
+    let timer_status = app.get_formatted_timer_status();
+    log_lines.push(Line::from(Span::styled(
+        format!("⏱️  {}", timer_status),
+        Style::default()
+            .add_modifier(Modifier::BOLD)
+            .fg(Color::Yellow),
+    )));
+
+    // Add current status message if not empty
+    if !app.status_message.is_empty() {
+        log_lines.push(Line::from(Span::styled(
+            format!("📢 {}", app.status_message),
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )));
+    }
+
+    log_lines.push(Line::from(Span::styled(
+        "─".repeat(area.width.saturating_sub(2) as usize), // Separator line
+        Style::default().fg(Color::Gray),
+    )));
+
+    // Add recent status messages (newest first)
+    let mut message_count = 0;
+    let max_messages = max_lines.saturating_sub(log_lines.len() + 1); // Reserve space for what we already have
+
+    for (message, _timestamp, utc2_timestamp) in app.status_messages.iter().rev() {
+        if message_count >= max_messages {
+            break;
+        }
+
+        // Skip pending API calls (messages with hourglass emoji)
+        if message.contains("⏳") {
+            continue;
+        }
+
+        // Extract only the time portion (HH:MM:SS) from the timestamp
+        let time_only = if utc2_timestamp.len() >= 19 {
+            // Extract "HH:MM:SS" from "YYYY-MM-DD HH:MM:SS"
+            &utc2_timestamp[11..19]
+        } else {
+            utc2_timestamp // Fallback to full timestamp if format is unexpected
+        };
+
+        // Create a line with time-only timestamp and message
+        log_lines.push(Line::from(vec![
+            Span::styled(
+                format!("[{}] ", time_only),
+                Style::default()
+                    .fg(Color::Gray)
+                    .add_modifier(Modifier::ITALIC),
+            ),
+            Span::styled(message, Style::default().fg(Color::White)),
+        ]));
+
+        message_count += 1;
+    }
+
+    // If no messages, show placeholder
+    if app.status_messages.is_empty() {
+        log_lines.push(Line::from(Span::styled(
+            "No status messages yet...",
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+    }
+
+    let log_paragraph = Paragraph::new(log_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Live Activity Log (h: Full History)"),
+        )
+        .wrap(Wrap { trim: false });
+
+    frame.render_widget(log_paragraph, area);
 }
 
 fn render_loaded_art_overlay(
