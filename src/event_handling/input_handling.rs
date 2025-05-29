@@ -182,11 +182,27 @@ impl App {
                             let art_center_offset_y = art_dimensions.1 / 2;
 
                             // Position art so its center is under the mouse cursor
-                            art.board_x = board_pixel_x - art_center_offset_x;
-                            art.board_y = board_pixel_y - art_center_offset_y;
+                            let proposed_x = board_pixel_x - art_center_offset_x;
+                            let proposed_y = board_pixel_y - art_center_offset_y;
+
+                            // Get board dimensions for bounds checking
+                            let board_width = self.board.len() as i32;
+                            let board_height = if board_width > 0 {
+                                self.board[0].len() as i32
+                            } else {
+                                0
+                            };
+
+                            // Clamp art position to stay within board bounds
+                            art.board_x = proposed_x
+                                .max(0) // Don't go left of board
+                                .min(board_width - art_dimensions.0); // Don't go right of board
+                            art.board_y = proposed_y
+                                .max(0) // Don't go above board
+                                .min(board_height - art_dimensions.1); // Don't go below board
 
                             self.status_message = format!(
-                                "Art '{}' centered at ({}, {}) via mouse. Press Enter to place.",
+                                "Art '{}' positioned at ({}, {}) via mouse. Press Enter to place.",
                                 art.name, art.board_x, art.board_y
                             );
                         } else {
@@ -443,26 +459,56 @@ impl App {
     async fn handle_main_input(&mut self, key_code: KeyCode) -> io::Result<()> {
         let mut art_moved = false;
         if self.loaded_art.is_some() {
+            // Get board dimensions for bounds checking
+            let board_width = self.board.len() as i32;
+            let board_height = if board_width > 0 {
+                self.board[0].len() as i32
+            } else {
+                0
+            };
+
             match key_code {
                 KeyCode::Up => {
-                    self.loaded_art.as_mut().unwrap().board_y =
-                        self.loaded_art.as_mut().unwrap().board_y.saturating_sub(1);
-                    art_moved = true;
+                    if let Some(art) = &mut self.loaded_art {
+                        let new_y = art.board_y.saturating_sub(1);
+                        // Only move if the art won't go above the board
+                        if new_y >= 0 {
+                            art.board_y = new_y;
+                            art_moved = true;
+                        }
+                    }
                 }
                 KeyCode::Down => {
-                    self.loaded_art.as_mut().unwrap().board_y =
-                        self.loaded_art.as_mut().unwrap().board_y.saturating_add(1);
-                    art_moved = true;
+                    if let Some(art) = &mut self.loaded_art {
+                        let art_dimensions = crate::art::get_art_dimensions(art);
+                        let new_y = art.board_y.saturating_add(1);
+                        // Only move if the art won't go below the board
+                        if new_y + art_dimensions.1 <= board_height {
+                            art.board_y = new_y;
+                            art_moved = true;
+                        }
+                    }
                 }
                 KeyCode::Left => {
-                    self.loaded_art.as_mut().unwrap().board_x =
-                        self.loaded_art.as_mut().unwrap().board_x.saturating_sub(1);
-                    art_moved = true;
+                    if let Some(art) = &mut self.loaded_art {
+                        let new_x = art.board_x.saturating_sub(1);
+                        // Only move if the art won't go left of the board
+                        if new_x >= 0 {
+                            art.board_x = new_x;
+                            art_moved = true;
+                        }
+                    }
                 }
                 KeyCode::Right => {
-                    self.loaded_art.as_mut().unwrap().board_x =
-                        self.loaded_art.as_mut().unwrap().board_x.saturating_add(1);
-                    art_moved = true;
+                    if let Some(art) = &mut self.loaded_art {
+                        let art_dimensions = crate::art::get_art_dimensions(art);
+                        let new_x = art.board_x.saturating_add(1);
+                        // Only move if the art won't go right of the board
+                        if new_x + art_dimensions.0 <= board_width {
+                            art.board_x = new_x;
+                            art_moved = true;
+                        }
+                    }
                 }
                 KeyCode::Enter => {
                     // Add loaded art to queue and start processing
@@ -848,12 +894,44 @@ impl App {
                         let art_center_offset_y = art_dimensions.1 / 2;
 
                         // Position art so its center aligns with viewport center
-                        art_to_load.board_x = viewport_center_x - art_center_offset_x;
-                        art_to_load.board_y = viewport_center_y - art_center_offset_y;
+                        let proposed_x = viewport_center_x - art_center_offset_x;
+                        let proposed_y = viewport_center_y - art_center_offset_y;
+
+                        // Get board dimensions for bounds checking
+                        let board_pixel_width = self.board.len() as i32;
+                        let board_pixel_height = if board_pixel_width > 0 {
+                            self.board[0].len() as i32
+                        } else {
+                            0
+                        };
+
+                        // Clamp art position to stay within board bounds
+                        art_to_load.board_x = proposed_x
+                            .max(0) // Don't go left of board
+                            .min(board_pixel_width - art_dimensions.0); // Don't go right of board
+                        art_to_load.board_y = proposed_y
+                            .max(0) // Don't go above board
+                            .min(board_pixel_height - art_dimensions.1); // Don't go below board
                     } else {
-                        // Fallback: center in current viewport using viewport coordinates
-                        art_to_load.board_x = self.board_viewport_x as i32 + 25; // Rough center estimate
-                        art_to_load.board_y = self.board_viewport_y as i32 + 15;
+                        // Fallback: center in current viewport using viewport coordinates with bounds checking
+                        let proposed_x = self.board_viewport_x as i32 + 25; // Rough center estimate
+                        let proposed_y = self.board_viewport_y as i32 + 15;
+
+                        // Get board dimensions for bounds checking
+                        let board_pixel_width = self.board.len() as i32;
+                        let board_pixel_height = if board_pixel_width > 0 {
+                            self.board[0].len() as i32
+                        } else {
+                            0
+                        };
+
+                        let art_dimensions = crate::art::get_art_dimensions(&art_to_load);
+
+                        // Clamp art position to stay within board bounds
+                        art_to_load.board_x =
+                            proposed_x.max(0).min(board_pixel_width - art_dimensions.0);
+                        art_to_load.board_y =
+                            proposed_y.max(0).min(board_pixel_height - art_dimensions.1);
                     }
 
                     // Load art for positioning
@@ -915,12 +993,44 @@ impl App {
                         let art_center_offset_y = art_dimensions.1 / 2;
 
                         // Position art so its center aligns with viewport center
-                        art_to_load.board_x = viewport_center_x - art_center_offset_x;
-                        art_to_load.board_y = viewport_center_y - art_center_offset_y;
+                        let proposed_x = viewport_center_x - art_center_offset_x;
+                        let proposed_y = viewport_center_y - art_center_offset_y;
+
+                        // Get board dimensions for bounds checking
+                        let board_pixel_width = self.board.len() as i32;
+                        let board_pixel_height = if board_pixel_width > 0 {
+                            self.board[0].len() as i32
+                        } else {
+                            0
+                        };
+
+                        // Clamp art position to stay within board bounds
+                        art_to_load.board_x = proposed_x
+                            .max(0) // Don't go left of board
+                            .min(board_pixel_width - art_dimensions.0); // Don't go right of board
+                        art_to_load.board_y = proposed_y
+                            .max(0) // Don't go above board
+                            .min(board_pixel_height - art_dimensions.1); // Don't go below board
                     } else {
-                        // Fallback: center in current viewport using viewport coordinates
-                        art_to_load.board_x = self.board_viewport_x as i32 + 25; // Rough center estimate
-                        art_to_load.board_y = self.board_viewport_y as i32 + 15;
+                        // Fallback: center in current viewport using viewport coordinates with bounds checking
+                        let proposed_x = self.board_viewport_x as i32 + 25; // Rough center estimate
+                        let proposed_y = self.board_viewport_y as i32 + 15;
+
+                        // Get board dimensions for bounds checking
+                        let board_pixel_width = self.board.len() as i32;
+                        let board_pixel_height = if board_pixel_width > 0 {
+                            self.board[0].len() as i32
+                        } else {
+                            0
+                        };
+
+                        let art_dimensions = crate::art::get_art_dimensions(&art_to_load);
+
+                        // Clamp art position to stay within board bounds
+                        art_to_load.board_x =
+                            proposed_x.max(0).min(board_pixel_width - art_dimensions.0);
+                        art_to_load.board_y =
+                            proposed_y.max(0).min(board_pixel_height - art_dimensions.1);
                     }
 
                     // Load art for positioning
