@@ -202,6 +202,42 @@ impl App {
             QueueUpdate::ApiCall { message } => {
                 self.add_status_message(message);
             }
+            QueueUpdate::EventTiming {
+                waiting_for_event,
+                event_starts_in_seconds,
+                event_message,
+            } => {
+                // Update app event timing state
+                self.waiting_for_event = waiting_for_event;
+                self.last_event_check_time = Some(Instant::now());
+
+                if waiting_for_event {
+                    if let Some(seconds_until_start) = event_starts_in_seconds {
+                        // Calculate the event start time based on current time + interval
+                        self.event_start_time = Some(
+                            std::time::SystemTime::now() + std::time::Duration::from_secs(seconds_until_start)
+                        );
+                    }
+                } else {
+                    // Event has ended or started, clear event timing
+                    self.event_start_time = None;
+                    self.event_end_time = None;
+                }
+
+                self.add_status_message(format!(
+                    "🕒 Event Timing: {} - {}",
+                    event_message,
+                    if waiting_for_event {
+                        if let Some(seconds) = event_starts_in_seconds {
+                            format!("{} seconds until event", seconds)
+                        } else {
+                            "Event timing unknown".to_string()
+                        }
+                    } else {
+                        "Event has ended".to_string()
+                    }
+                ));
+            }
         }
     }
 
@@ -642,11 +678,188 @@ impl App {
                                         status,
                                         error_response,
                                     } => {
-                                        // Check if this is a cooldown/rate limit error
-                                        if *status == reqwest::StatusCode::TOO_MANY_REQUESTS
-											|| status.as_u16() == 425 // Too Early
-											|| status.as_u16() == 420
-                                        // Enhance Your Hype
+                                        // Check if this is an event timing error (420)
+                                        if status.as_u16() == 420 {
+                                            // Handle "Enhance Your Calm - Out of event date"
+                                            let wait_time = if let Some(interval) =
+                                                error_response.interval
+                                            {
+                                                if interval > 0 {
+                                                    // Event hasn't started yet - interval is seconds until start
+
+                                                    // Send event timing update to main app
+                                                    let _ = tx.send(QueueUpdate::EventTiming {
+                                                        waiting_for_event: true,
+                                                        event_starts_in_seconds: Some(
+                                                            interval as u64,
+                                                        ),
+                                                        event_message: format!(
+                                                            "Event starts in {}",
+                                                            if interval > 3600 {
+                                                                let hours = interval / 3600;
+                                                                let minutes =
+                                                                    (interval % 3600) / 60;
+                                                                if minutes > 0 {
+                                                                    format!(
+                                                                        "{}h {}m",
+                                                                        hours, minutes
+                                                                    )
+                                                                } else {
+                                                                    format!("{}h", hours)
+                                                                }
+                                                            } else if interval > 60 {
+                                                                let minutes = interval / 60;
+                                                                let seconds = interval % 60;
+                                                                if seconds > 0 {
+                                                                    format!(
+                                                                        "{}m {}s",
+                                                                        minutes, seconds
+                                                                    )
+                                                                } else {
+                                                                    format!("{}m", minutes)
+                                                                }
+                                                            } else {
+                                                                format!("{}s", interval)
+                                                            }
+                                                        ),
+                                                    });
+
+                                                    interval as u64
+                                                } else {
+                                                    // Event has ended - interval is negative seconds since end
+                                                    // Send event ended update
+                                                    let _ = tx.send(QueueUpdate::EventTiming {
+                                                        waiting_for_event: false,
+                                                        event_starts_in_seconds: None,
+                                                        event_message: format!(
+                                                            "Event ended {} seconds ago",
+                                                            interval.abs()
+                                                        ),
+                                                    });
+
+                                                    // For ended events, we should probably stop processing
+                                                    let _ = tx.send(QueueUpdate::ItemFailed {
+                                                        item_index: original_index,
+                                                        art_name: queue_item.art.name.clone(),
+                                                        error_msg: format!(
+                                                            "Event ended {} seconds ago. Event outside active window.",
+                                                            interval.abs()
+                                                        ),
+                                                    });
+                                                    return;
+                                                }
+                                            } else {
+                                                // No interval provided - use default wait
+                                                let _ = tx.send(QueueUpdate::EventTiming {
+                                                    waiting_for_event: true,
+                                                    event_starts_in_seconds: Some(300), // Default 5 minutes
+                                                    event_message:
+                                                        "Event timing unknown, waiting 5 minutes"
+                                                            .to_string(),
+                                                });
+                                                300 // 5 minutes default
+                                            };
+
+                                            // Update display with event timing info
+                                            let display_pixels_placed = pixels_placed_for_item + pixels_already_correct_at_start;
+                                            let _ = tx.send(QueueUpdate::ItemProgress {
+                                                item_index: original_index,
+                                                art_name: queue_item.art.name.clone(),
+                                                pixels_placed: display_pixels_placed,
+                                                total_pixels: total_meaningful_pixels,
+                                                position: (abs_x, abs_y),
+                                                cooldown_remaining: Some(wait_time as u32),
+                                            });
+
+                                            // For very long waits (over 10 minutes), check periodically if event started
+                                            if wait_time > 600 {
+                                                let mut total_waited = 0u64;
+                                                while total_waited < wait_time {
+                                                    let wait_chunk = std::cmp::min(300, wait_time - total_waited); // Check every 5 minutes
+                                                    tokio::time::sleep(Duration::from_secs(wait_chunk)).await;
+                                                    total_waited += wait_chunk;
+
+                                                    // Try a quick test placement to see if event started
+                                                    let test_result = api_client.place_pixel(abs_x, abs_y, art_pixel.color).await;
+                                                    match test_result {
+                                                        Ok(_) => {
+                                                            // Event started! Continue with normal placement
+                                                            let _ = tx.send(QueueUpdate::EventTiming {
+                                                                waiting_for_event: false,
+                                                                event_starts_in_seconds: None,
+                                                                event_message: "Event started! Resuming placement".to_string(),
+                                                            });
+                                                            let _ = tx.send(QueueUpdate::ApiCall {
+                                                                message: "🎉 Event started! Resuming placement...".to_string(),
+                                                            });
+                                                            break;
+                                                        }
+                                                        Err(crate::api_client::ApiError::ErrorResponse { status, error_response }) 
+                                                            if status.as_u16() == 420 => 
+                                                        {
+                                                            // Still waiting for event - update countdown
+                                                            if let Some(new_interval) = error_response.interval {
+                                                                if new_interval > 0 {
+                                                                    let remaining_wait = new_interval as u64;
+                                                                    
+                                                                    // Update event timing
+                                                                    let _ = tx.send(QueueUpdate::EventTiming {
+                                                                        waiting_for_event: true,
+                                                                        event_starts_in_seconds: Some(remaining_wait),
+                                                                        event_message: format!("Event starts in {}", 
+                                                                            if remaining_wait > 60 {
+                                                                                let minutes = remaining_wait / 60;
+                                                                                format!("{}m", minutes)
+                                                                            } else {
+                                                                                format!("{}s", remaining_wait)
+                                                                            }
+                                                                        ),
+                                                                    });
+                                                                    
+                                                                    let _ = tx.send(QueueUpdate::ItemProgress {
+                                                                        item_index: original_index,
+                                                                        art_name: queue_item.art.name.clone(),
+                                                                        pixels_placed: display_pixels_placed,
+                                                                        total_pixels: total_meaningful_pixels,
+                                                                        position: (abs_x, abs_y),
+                                                                        cooldown_remaining: Some(remaining_wait as u32),
+                                                                    });
+                                                                    continue; // Continue waiting with updated time
+                                                                } else {
+                                                                    // Event ended while we were waiting
+                                                                    let _ = tx.send(QueueUpdate::EventTiming {
+                                                                        waiting_for_event: false,
+                                                                        event_starts_in_seconds: None,
+                                                                        event_message: format!("Event ended {} seconds ago", new_interval.abs()),
+                                                                    });
+                                                                    let _ = tx.send(QueueUpdate::ItemFailed {
+                                                                        item_index: original_index,
+                                                                        art_name: queue_item.art.name.clone(),
+                                                                        error_msg: "Event ended while waiting. Event outside active window.".to_string(),
+                                                                    });
+                                                                    return;
+                                                                }
+                                                            }
+                                                        }
+                                                        Err(_) => {
+                                                            // Some other error - might be auth, might be network
+                                                            // Don't break the wait, just continue
+                                                            continue;
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                // Short wait - just wait the full duration
+                                                tokio::time::sleep(Duration::from_secs(wait_time)).await;
+                                            }
+
+                                            // Continue to retry pixel placement after waiting
+                                            continue;
+                                        }
+                                        // Check if this is a regular cooldown/rate limit error
+                                        else if *status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                                            || status.as_u16() == 425
+                                        // Too Early
                                         {
                                             // Update user info with new timers from error response
                                             if let Some(timers) = &error_response.timers {

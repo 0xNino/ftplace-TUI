@@ -125,6 +125,12 @@ pub struct App {
     // Art deletion confirmation
     pub delete_confirmation_selection: bool, // true = Yes, false = No (default)
     pub art_to_delete_index: Option<usize>,  // Index of art to delete
+
+    // Event timing state for 420 responses
+    pub event_start_time: Option<std::time::SystemTime>, // When the current event starts (UTC)
+    pub event_end_time: Option<std::time::SystemTime>,   // When the current event ends (UTC)
+    pub waiting_for_event: bool, // Whether we're currently waiting for an event to start
+    pub last_event_check_time: Option<Instant>, // Last time we checked event status
 }
 
 #[derive(Debug)]
@@ -217,6 +223,11 @@ pub enum QueueUpdate {
     },
     ApiCall {
         message: String,
+    },
+    EventTiming {
+        waiting_for_event: bool,
+        event_starts_in_seconds: Option<u64>, // None if event has ended or unknown
+        event_message: String,
     },
 }
 

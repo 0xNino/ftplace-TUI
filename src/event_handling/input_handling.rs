@@ -20,6 +20,9 @@ impl App {
         // Update cooldown status with current timer info
         self.update_cooldown_status();
 
+        // Update event timer status if waiting for event
+        self.update_event_timer_status();
+
         // Clean up old status messages
         self.cleanup_old_status_messages();
 

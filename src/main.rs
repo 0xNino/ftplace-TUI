@@ -126,6 +126,10 @@ impl App {
             current_share_coords: None,
             delete_confirmation_selection: false, // Default to "No"
             art_to_delete_index: None,
+            event_start_time: None,
+            event_end_time: None,
+            waiting_for_event: false,
+            last_event_check_time: None,
         };
 
         // Load saved queue

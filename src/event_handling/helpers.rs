@@ -322,6 +322,24 @@ impl App {
         }
     }
 
+    /// Update event timer status to refresh countdown display
+    pub fn update_event_timer_status(&mut self) {
+        if self.waiting_for_event {
+            if let Some(event_start_time) = self.event_start_time {
+                // Check if event has started
+                if let Ok(_elapsed_since_start) =
+                    std::time::SystemTime::now().duration_since(event_start_time)
+                {
+                    // Event has started, clear waiting state
+                    self.waiting_for_event = false;
+                    self.event_start_time = None;
+                    self.event_end_time = None;
+                    self.last_event_check_time = None;
+                }
+            }
+        }
+    }
+
     /// Check if tokens were refreshed and save them if needed
     #[allow(dead_code)]
     pub async fn check_and_save_refreshed_tokens(&mut self) {

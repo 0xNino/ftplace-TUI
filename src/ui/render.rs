@@ -313,6 +313,11 @@ fn render_board_display(app: &mut App, frame: &mut Frame, area: Rect) {
     if !app.art_queue.is_empty() {
         render_queue_overlay(app, frame, &inner_board_area);
     }
+
+    // Render event timer overlay if waiting for event
+    if app.waiting_for_event {
+        render_event_timer_overlay(app, frame, &inner_board_area);
+    }
 }
 
 fn render_loaded_art_overlay(
@@ -628,4 +633,65 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+/// Render event timer overlay on top of the canvas
+fn render_event_timer_overlay(app: &App, frame: &mut Frame, inner_board_area: &Rect) {
+    if let Some(event_start_time) = app.event_start_time {
+        // Calculate remaining time until event starts
+        if let Ok(duration_until_start) =
+            event_start_time.duration_since(std::time::SystemTime::now())
+        {
+            let seconds_remaining = duration_until_start.as_secs();
+
+            // Format the countdown display
+            let timer_text = if seconds_remaining > 3600 {
+                let hours = seconds_remaining / 3600;
+                let minutes = (seconds_remaining % 3600) / 60;
+                let seconds = seconds_remaining % 60;
+                if minutes > 0 {
+                    format!("⏰ Event starts in {}h {}m {}s", hours, minutes, seconds)
+                } else {
+                    format!("⏰ Event starts in {}h {}s", hours, seconds)
+                }
+            } else if seconds_remaining > 60 {
+                let minutes = seconds_remaining / 60;
+                let seconds = seconds_remaining % 60;
+                format!("⏰ Event starts in {}m {}s", minutes, seconds)
+            } else {
+                format!("⏰ Event starts in {}s", seconds_remaining)
+            };
+
+            // Create a small overlay in the top-center of the board area
+            let timer_width = (timer_text.len() as u16 + 4).min(inner_board_area.width);
+            let timer_area = Rect {
+                x: inner_board_area.x + (inner_board_area.width.saturating_sub(timer_width)) / 2,
+                y: inner_board_area.y,
+                width: timer_width,
+                height: 3,
+            };
+
+            // Render the timer background
+            let timer_block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Yellow))
+                .style(Style::default().bg(Color::Black));
+            frame.render_widget(timer_block, timer_area);
+
+            // Render the timer text
+            let timer_paragraph = Paragraph::new(timer_text)
+                .style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .alignment(Alignment::Center);
+
+            let inner_timer_area = timer_area.inner(Margin {
+                vertical: 1,
+                horizontal: 1,
+            });
+            frame.render_widget(timer_paragraph, inner_timer_area);
+        }
+    }
 }
