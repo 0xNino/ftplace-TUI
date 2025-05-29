@@ -1283,7 +1283,7 @@ impl App {
             // Wait for cooldown if needed
             if let Some(u_info) = &self.user_info {
                 if u_info.pixel_buffer <= 0 && u_info.pixel_timer > 0 {
-                    tokio::time::sleep(Duration::from_secs(u_info.pixel_timer as u64)).await;
+                    tokio::time::sleep(Duration::from_secs((u_info.pixel_timer * 60) as u64)).await; // Convert minutes to seconds
                 }
             }
 
@@ -1622,7 +1622,7 @@ pub fn calculate_cooldown_wait_time(user_info: &UserInfos) -> u64 {
         if timers.is_empty() {
             // No active timers - this usually means user has no pixels available for a long time
             // Use pixel_timer as base but be more conservative
-            let fallback_time = (user_info.pixel_timer as f64 / 1000.0) as u64;
+            let fallback_time = (user_info.pixel_timer as f64 * 60.0) as u64; // Convert minutes to seconds
             return fallback_time.max(60); // Minimum 1 minute when no timers
         }
 
@@ -1639,7 +1639,7 @@ pub fn calculate_cooldown_wait_time(user_info: &UserInfos) -> u64 {
         if earliest_expiry == i64::MAX {
             // All timers have expired but we still got 425 error
             // This suggests the user has no pixels available for a longer period
-            let fallback_time = (user_info.pixel_timer as f64 / 1000.0) as u64;
+            let fallback_time = (user_info.pixel_timer as f64 * 60.0) as u64; // Convert minutes to seconds
             return fallback_time.max(60); // Minimum 1 minute
         }
 
@@ -1651,7 +1651,7 @@ pub fn calculate_cooldown_wait_time(user_info: &UserInfos) -> u64 {
         wait_time_secs.max(1) + 2 // Minimum 1 second + 2 second buffer
     } else {
         // No timer data at all - very conservative fallback
-        let fallback_time = (user_info.pixel_timer as f64 / 1000.0) as u64;
+        let fallback_time = (user_info.pixel_timer as f64 * 60.0) as u64; // Convert minutes to seconds
         fallback_time.max(120) // Minimum 2 minutes when no timer data
     }
 }

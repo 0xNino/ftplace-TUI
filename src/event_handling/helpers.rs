@@ -213,13 +213,13 @@ impl App {
                 } else {
                     self.cooldown_status = format!(
                         "No active timers - Cooldown: {}s",
-                        user_info.pixel_timer / 1000
+                        user_info.pixel_timer * 60 // Convert minutes to seconds
                     );
                 }
             } else {
                 self.cooldown_status = format!(
                     "No timers data - Cooldown: {}s",
-                    user_info.pixel_timer / 1000
+                    user_info.pixel_timer * 60 // Convert minutes to seconds
                 );
             }
         } else {
@@ -295,13 +295,13 @@ impl App {
                 } else {
                     format!(
                         "🟡 No active timers - Cooldown: {}s",
-                        user_info.pixel_timer / 1000
+                        user_info.pixel_timer * 60 // Convert minutes to seconds
                     )
                 }
             } else {
                 format!(
                     "🟡 No timers data - Cooldown: {}s",
-                    user_info.pixel_timer / 1000
+                    user_info.pixel_timer * 60 // Convert minutes to seconds
                 )
             }
         } else {

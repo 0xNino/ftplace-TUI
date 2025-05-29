@@ -81,8 +81,9 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
     let queue_layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(70), // Queue list
-            Constraint::Percentage(30), // Controls/Info
+            Constraint::Percentage(50), // Queue list
+            Constraint::Percentage(25), // Statistics
+            Constraint::Percentage(25), // Debug info
         ])
         .split(area);
 
@@ -117,14 +118,30 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
 
             let pause_indicator = if item.paused { " ⏸️" } else { "" };
 
+            // Calculate estimated time for pending items
+            let estimated_time =
+                if item.status == crate::app_state::QueueStatus::Pending && !item.paused {
+                    let remaining_pixels = item.pixels_total.saturating_sub(item.pixels_placed);
+                    if remaining_pixels > 0 {
+                        calculate_estimated_time(app, remaining_pixels)
+                            .map(|time| format!(" ~{}", time))
+                            .unwrap_or_default()
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                };
+
             let item_text = format!(
-                "{} P{} '{}' @ ({},{}){}{}",
+                "{} P{} '{}' @ ({},{}){}{}{}",
                 status_symbol,
                 item.priority,
                 item.art.name,
                 item.art.board_x,
                 item.art.board_y,
                 progress,
+                estimated_time,
                 pause_indicator
             );
 
@@ -175,15 +192,57 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
         .map(|item| item.pixels_total)
         .sum::<usize>();
 
+    // Calculate total estimated time for all pending items
+    let total_remaining_pixels: usize = app
+        .art_queue
+        .iter()
+        .filter(|item| item.status == crate::app_state::QueueStatus::Pending && !item.paused)
+        .map(|item| item.pixels_total.saturating_sub(item.pixels_placed))
+        .sum();
+
+    let total_estimated_time = if total_remaining_pixels > 0 {
+        calculate_estimated_time(app, total_remaining_pixels)
+    } else {
+        None
+    };
+
     let mut controls_text = vec![
         Line::from(Span::styled(
             "Queue Statistics",
             Style::default().add_modifier(Modifier::BOLD),
         )),
-        Line::from(format!("Pending: {}", pending_count)),
-        Line::from(format!("Paused: {}", paused_count)),
+        Line::from(format!(
+            "Pending: {} | Paused: {}",
+            pending_count, paused_count
+        )),
         Line::from(format!("Total Pixels: {}", total_pixels)),
     ];
+
+    // Add total estimated time if available
+    if let Some(estimated_time) = total_estimated_time {
+        controls_text.push(Line::from(Span::styled(
+            format!("Est. Time: ~{}", estimated_time),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
+
+    // Add current placement rate info (compact format)
+    if let Some(user_info) = &app.user_info {
+        let cooldown_minutes = user_info.pixel_timer as f64; // Backend sends this in minutes already
+        let buffer_size = user_info.pixel_buffer;
+        let available_pixels = if let Some(timers) = &user_info.timers {
+            user_info.pixel_buffer - timers.len() as i32
+        } else {
+            user_info.pixel_buffer
+        };
+
+        controls_text.push(Line::from(format!(
+            "Rate: {} pixels/{:.1}min | Now: {}",
+            buffer_size, cooldown_minutes, available_pixels
+        )));
+    }
 
     // Add hint if selected item is failed
     if !app.art_queue.is_empty() && app.queue_selection_index < app.art_queue.len() {
@@ -199,47 +258,86 @@ pub fn render_art_queue_ui(app: &App, frame: &mut Frame, area: Rect) {
         }
     }
 
+    // Add essential controls
     controls_text.extend(vec![
         Line::from(""),
         Line::from(Span::styled(
             "Controls",
             Style::default().add_modifier(Modifier::BOLD),
         )),
-        Line::from("↑/↓  : Navigate queue"),
-        Line::from("u/k  : Move item up"),
-        Line::from("j/n  : Move item down"),
-        Line::from("Enter: Resume failed/Start processing"),
-        Line::from("p/s  : Pause/Resume item"),
-        Line::from("1-5  : Set priority"),
-        Line::from("d/Del: Remove item"),
-        Line::from("c    : Clear queue"),
-        Line::from("l    : Add more arts"),
-        Line::from("Esc  : Exit queue view"),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Priority Colors",
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-        Line::from(vec![
-            Span::styled("1-High ", Style::default().fg(Color::Red)),
-            Span::styled("2-Med+ ", Style::default().fg(Color::Yellow)),
-            Span::styled("3-Med ", Style::default().fg(Color::Cyan)),
-        ]),
-        Line::from(vec![
-            Span::styled("4-Low+ ", Style::default().fg(Color::Green)),
-            Span::styled("5-Low ", Style::default().fg(Color::Blue)),
-        ]),
+        Line::from("↑/↓: Navigate"),
+        Line::from("Enter: Start/Resume"),
+        Line::from("1-5: Set priority"),
+        Line::from("d: Remove item"),
+        Line::from("Esc: Exit"),
     ]);
 
     let controls_paragraph = Paragraph::new(controls_text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Info & Controls"),
-        )
+        .block(Block::default().borders(Borders::ALL).title("Statistics"))
         .wrap(Wrap { trim: false });
 
     frame.render_widget(controls_paragraph, queue_layout[1]);
+
+    // Render debug info panel
+    let mut debug_text = vec![Line::from(Span::styled(
+        "Debug Info",
+        Style::default().add_modifier(Modifier::BOLD),
+    ))];
+
+    if let Some(user_info) = &app.user_info {
+        let cooldown_minutes = user_info.pixel_timer as f64;
+        let buffer_size = user_info.pixel_buffer;
+        let available_pixels = if let Some(timers) = &user_info.timers {
+            user_info.pixel_buffer - timers.len() as i32
+        } else {
+            user_info.pixel_buffer
+        };
+
+        debug_text.extend(vec![
+            Line::from(format!("Buffer: {} pixels", buffer_size)),
+            Line::from(format!("Cooldown: {:.1} min", cooldown_minutes)),
+            Line::from(format!("Available: {} now", available_pixels)),
+        ]);
+
+        // Add calculation example for selected item
+        if !app.art_queue.is_empty() && app.queue_selection_index < app.art_queue.len() {
+            let selected_item = &app.art_queue[app.queue_selection_index];
+            if selected_item.status == crate::app_state::QueueStatus::Pending
+                && !selected_item.paused
+            {
+                let remaining_pixels = selected_item
+                    .pixels_total
+                    .saturating_sub(selected_item.pixels_placed);
+                let remaining_after_immediate =
+                    remaining_pixels.saturating_sub(available_pixels.max(0) as usize);
+                let cycles_needed = if buffer_size > 0 {
+                    (remaining_after_immediate + buffer_size as usize - 1) / buffer_size as usize
+                } else {
+                    0
+                };
+
+                debug_text.extend(vec![
+                    Line::from(""),
+                    Line::from("Selected item calc:"),
+                    Line::from(format!("Remaining: {}", remaining_pixels)),
+                    Line::from(format!("After immed: {}", remaining_after_immediate)),
+                    Line::from(format!("Cycles: {}", cycles_needed)),
+                    Line::from(format!(
+                        "Time: {:.1}min",
+                        cycles_needed as f64 * cooldown_minutes
+                    )),
+                ]);
+            }
+        }
+    } else {
+        debug_text.push(Line::from("No user info"));
+    }
+
+    let debug_paragraph = Paragraph::new(debug_text)
+        .block(Block::default().borders(Borders::ALL).title("Debug"))
+        .wrap(Wrap { trim: false });
+
+    frame.render_widget(debug_paragraph, queue_layout[2]);
 }
 
 /// Render the share selection UI for viewing and loading shared arts
@@ -705,4 +803,75 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+/// Calculate estimated completion time for a queue item based on current cooldown status
+fn calculate_estimated_time(
+    app: &crate::app_state::App,
+    remaining_pixels: usize,
+) -> Option<String> {
+    if let Some(user_info) = &app.user_info {
+        let available_pixels = if let Some(timers) = &user_info.timers {
+            user_info.pixel_buffer - timers.len() as i32
+        } else {
+            user_info.pixel_buffer
+        };
+
+        // Calculate placement using discrete cooldown cycles
+        let cooldown_seconds = user_info.pixel_timer as f64 * 60.0; // Convert minutes to seconds
+        let buffer_size = user_info.pixel_buffer as usize;
+
+        if buffer_size > 0 && remaining_pixels > 0 {
+            // Account for immediate placement of available pixels
+            let immediate_pixels = available_pixels.max(0) as usize;
+            let remaining_after_immediate = remaining_pixels.saturating_sub(immediate_pixels);
+
+            if remaining_after_immediate == 0 {
+                return Some("< 1min".to_string());
+            }
+
+            // Calculate how many full cooldown cycles we need for remaining pixels
+            // Each cycle gives us the full buffer back (assuming we paint whole buffer at once)
+            let full_cycles_needed = (remaining_after_immediate + buffer_size - 1) / buffer_size; // Ceiling division
+            let total_cooldown_time = full_cycles_needed as f64 * cooldown_seconds;
+
+            // Debug: For your case this should be:
+            // remaining_pixels = 26, immediate_pixels = ?, remaining_after_immediate = ?
+            // buffer_size = 20, full_cycles_needed = ?, total_cooldown_time = ?
+
+            // Convert seconds to appropriate time format
+            if total_cooldown_time < 60.0 {
+                // Less than 1 minute of cooldown time
+                Some(format!("{}s", total_cooldown_time.ceil() as u32))
+            } else if total_cooldown_time < 3600.0 {
+                // Less than 1 hour
+                let total_minutes = (total_cooldown_time / 60.0).ceil() as u32;
+                if total_minutes < 60 {
+                    Some(format!("{}m", total_minutes))
+                } else {
+                    let hours = total_minutes / 60;
+                    let minutes = total_minutes % 60;
+                    if minutes > 0 {
+                        Some(format!("{}h{}m", hours, minutes))
+                    } else {
+                        Some(format!("{}h", hours))
+                    }
+                }
+            } else {
+                // 1 hour or more
+                let total_hours = (total_cooldown_time / 3600.0).ceil() as u32;
+                let days = total_hours / 24;
+                let hours = total_hours % 24;
+                if hours > 0 {
+                    Some(format!("{}d{}h", days, hours))
+                } else {
+                    Some(format!("{}d", days))
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    }
 }

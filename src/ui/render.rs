@@ -17,7 +17,7 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
         .constraints([
             Constraint::Length(5), // Increased height for Base URL selection list or input
             Constraint::Min(0),    // Board Display or Art Editor
-            Constraint::Length(8), // Controls / Status - Increased from 5 to 8 for more status messages
+            Constraint::Length(6), // Controls / Status - Reduced from 8 to 6 for more queue space
         ])
         .split(frame.size());
 

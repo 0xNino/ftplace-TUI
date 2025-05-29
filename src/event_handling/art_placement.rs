@@ -168,7 +168,7 @@ impl App {
                 // Check for cooldown before placing pixel
                 if let Some(ref info) = user_info {
                     if info.pixel_buffer <= 0 && info.pixel_timer > 0 {
-                        let cooldown_duration = Duration::from_secs(info.pixel_timer as u64);
+                        let cooldown_duration = Duration::from_secs((info.pixel_timer * 60) as u64);
                         let start_time = Instant::now();
 
                         // Wait for cooldown with periodic updates
@@ -334,11 +334,11 @@ impl App {
                 if u_info.pixel_buffer <= 0 && u_info.pixel_timer > 0 {
                     self.status_message = format!(
                         "Cooldown active: waiting {}s before placing pixel {}/{}.",
-                        u_info.pixel_timer,
+                        u_info.pixel_timer * 60,
                         index + 1,
                         total_pixels
                     );
-                    tokio::time::sleep(Duration::from_secs(u_info.pixel_timer as u64)).await;
+                    tokio::time::sleep(Duration::from_secs((u_info.pixel_timer * 60) as u64)).await;
                 }
             }
 

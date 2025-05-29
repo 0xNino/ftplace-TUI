@@ -188,7 +188,7 @@ pub fn render_profile_popup(app: &App, frame: &mut Frame) {
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("{}ms", user_info.pixel_timer),
+                format!("{}min", user_info.pixel_timer),
                 Style::default().fg(Color::Cyan),
             ),
         ]));
