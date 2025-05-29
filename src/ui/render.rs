@@ -202,45 +202,8 @@ fn render_board_display(app: &mut App, frame: &mut Frame, area: Rect) {
         vertical: 1,
         horizontal: 1,
     });
-    app.board_area_bounds = Some((
-        inner_board_area.x,
-        inner_board_area.y,
-        inner_board_area.width,
-        inner_board_area.height,
-    ));
-    let board_title = if app.board_loading {
-        let elapsed = app
-            .board_load_start
-            .map(|start| start.elapsed().as_secs())
-            .unwrap_or(0);
-        format!(
-            "Board Display - Loading... ({}s) - Size {}x{}",
-            elapsed,
-            app.board.len(),
-            if app.board.is_empty() {
-                0
-            } else {
-                app.board[0].len()
-            }
-        )
-    } else {
-        format!(
-            "Board Display (Viewport @ {},{} - Size {}x{})",
-            app.board_viewport_x,
-            app.board_viewport_y,
-            app.board.len(),
-            if app.board.is_empty() {
-                0
-            } else {
-                app.board[0].len()
-            }
-        )
-    };
 
-    let board_block = Block::default().borders(Borders::ALL).title(board_title);
-    frame.render_widget(board_block, area);
-
-    // Clamp viewport coordinates
+    // Get actual board dimensions
     let board_pixel_width = app.board.len();
     let board_pixel_height = if board_pixel_width > 0 {
         app.board[0].len()
@@ -248,15 +211,67 @@ fn render_board_display(app: &mut App, frame: &mut Frame, area: Rect) {
         0
     };
 
-    if board_pixel_height > (inner_board_area.height * 2) as usize {
+    // Calculate how much terminal space the actual board needs
+    let board_terminal_width = board_pixel_width as u16;
+    let board_terminal_height = (board_pixel_height as u16 + 1) / 2; // Each terminal row shows 2 pixels
+
+    // Center the board within the available area
+    let board_offset_x = if board_terminal_width < inner_board_area.width {
+        (inner_board_area.width - board_terminal_width) / 2
+    } else {
+        0
+    };
+    let board_offset_y = if board_terminal_height < inner_board_area.height {
+        (inner_board_area.height - board_terminal_height) / 2
+    } else {
+        0
+    };
+
+    // Calculate the actual drawable board area (centered within inner_board_area)
+    let drawable_board_area = Rect {
+        x: inner_board_area.x + board_offset_x,
+        y: inner_board_area.y + board_offset_y,
+        width: board_terminal_width.min(inner_board_area.width),
+        height: board_terminal_height.min(inner_board_area.height),
+    };
+
+    // Store the centered board area bounds for mouse coordinate conversion
+    app.board_area_bounds = Some((
+        drawable_board_area.x,
+        drawable_board_area.y,
+        drawable_board_area.width,
+        drawable_board_area.height,
+    ));
+
+    let board_title = if app.board_loading {
+        let elapsed = app
+            .board_load_start
+            .map(|start| start.elapsed().as_secs())
+            .unwrap_or(0);
+        format!(
+            "Board Display - Loading... ({}s) - Size {}x{}",
+            elapsed, board_pixel_width, board_pixel_height
+        )
+    } else {
+        format!(
+            "Board Display (Viewport @ {},{} - Size {}x{})",
+            app.board_viewport_x, app.board_viewport_y, board_pixel_width, board_pixel_height
+        )
+    };
+
+    let board_block = Block::default().borders(Borders::ALL).title(board_title);
+    frame.render_widget(board_block, area);
+
+    // Clamp viewport coordinates to board bounds
+    if board_pixel_height > (drawable_board_area.height * 2) as usize {
         let max_scroll_y_pixels =
-            (board_pixel_height - (inner_board_area.height * 2) as usize) as u16;
+            (board_pixel_height - (drawable_board_area.height * 2) as usize) as u16;
         app.board_viewport_y = app.board_viewport_y.min(max_scroll_y_pixels);
     } else {
         app.board_viewport_y = 0;
     }
-    if board_pixel_width > inner_board_area.width as usize {
-        let max_scroll_x_pixels = (board_pixel_width - inner_board_area.width as usize) as u16;
+    if board_pixel_width > drawable_board_area.width as usize {
+        let max_scroll_x_pixels = (board_pixel_width - drawable_board_area.width as usize) as u16;
         app.board_viewport_x = app.board_viewport_x.min(max_scroll_x_pixels);
     } else {
         app.board_viewport_x = 0;
@@ -264,67 +279,63 @@ fn render_board_display(app: &mut App, frame: &mut Frame, area: Rect) {
 
     let default_board_color_info = app.colors.iter().find(|c| c.id == 1);
     let default_board_rgb =
-        default_board_color_info.map_or(Color::Black, |ci| Color::Rgb(ci.red, ci.green, ci.blue)); // Fallback to Black if color 1 not found
+        default_board_color_info.map_or(Color::Black, |ci| Color::Rgb(ci.red, ci.green, ci.blue));
 
+    // Render only the actual board pixels within the centered area
     if !app.board.is_empty() && !app.colors.is_empty() {
-        for y_screen_cell in 0..inner_board_area.height {
-            for x_screen_cell in 0..inner_board_area.width {
+        for y_screen_cell in 0..drawable_board_area.height {
+            for x_screen_cell in 0..drawable_board_area.width {
                 let board_px_x = app.board_viewport_x as usize + x_screen_cell as usize;
                 let board_px_y_top = app.board_viewport_y as usize + (y_screen_cell * 2) as usize;
                 let board_px_y_bottom = board_px_y_top + 1;
 
-                let top_pixel_color = if board_px_x < app.board.len()
-                    && board_px_y_top < app.board[board_px_x].len()
-                {
-                    app.board[board_px_x][board_px_y_top]
+                // Only render if within actual board bounds
+                if board_px_x < board_pixel_width && board_px_y_top < board_pixel_height {
+                    let top_pixel_color = app.board[board_px_x][board_px_y_top]
                         .as_ref()
                         .map_or(default_board_rgb, |p| {
                             get_ratatui_color(app, p.c, default_board_rgb)
-                        })
-                } else {
-                    default_board_rgb // Out of bounds for top pixel
-                };
+                        });
 
-                let bottom_pixel_color = if board_px_x < app.board.len()
-                    && board_px_y_bottom < app.board[board_px_x].len()
-                {
-                    app.board[board_px_x][board_px_y_bottom]
-                        .as_ref()
-                        .map_or(default_board_rgb, |p| {
-                            get_ratatui_color(app, p.c, default_board_rgb)
-                        })
-                } else {
-                    default_board_rgb // Out of bounds for bottom pixel, or if board has odd height and this is the last cell row
-                };
+                    let bottom_pixel_color = if board_px_y_bottom < board_pixel_height {
+                        app.board[board_px_x][board_px_y_bottom]
+                            .as_ref()
+                            .map_or(default_board_rgb, |p| {
+                                get_ratatui_color(app, p.c, default_board_rgb)
+                            })
+                    } else {
+                        default_board_rgb // Bottom half is out of bounds
+                    };
 
-                let cell_char = '▀';
-                let style = Style::default().fg(top_pixel_color).bg(bottom_pixel_color);
+                    let cell_char = '▀';
+                    let style = Style::default().fg(top_pixel_color).bg(bottom_pixel_color);
 
-                frame
-                    .buffer_mut()
-                    .get_mut(
-                        inner_board_area.x + x_screen_cell,
-                        inner_board_area.y + y_screen_cell,
-                    )
-                    .set_char(cell_char)
-                    .set_style(style);
+                    frame
+                        .buffer_mut()
+                        .get_mut(
+                            drawable_board_area.x + x_screen_cell,
+                            drawable_board_area.y + y_screen_cell,
+                        )
+                        .set_char(cell_char)
+                        .set_style(style);
+                }
             }
         }
     }
 
-    // Overlay loaded_art if present - this needs to be aware of the half-blocks and viewport
+    // Overlay loaded_art if present - use drawable_board_area instead of inner_board_area
     if let Some(art) = &app.loaded_art {
-        render_loaded_art_overlay(app, frame, &inner_board_area, art);
+        render_loaded_art_overlay(app, frame, &drawable_board_area, art);
     }
 
     // Overlay queue previews with progress-aware visual feedback
     if !app.art_queue.is_empty() {
-        render_queue_overlay(app, frame, &inner_board_area);
+        render_queue_overlay(app, frame, &drawable_board_area);
     }
 
     // Render event timer overlay if waiting for event
     if app.waiting_for_event {
-        render_event_timer_overlay(app, frame, &inner_board_area);
+        render_event_timer_overlay(app, frame, &drawable_board_area);
     }
 }
 
