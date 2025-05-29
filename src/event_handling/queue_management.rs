@@ -27,7 +27,7 @@ impl App {
                 pixels_placed,
                 total_pixels,
                 position,
-                cooldown_remaining,
+                cooldown_remaining: _,
             } => {
                 // Update the queue item progress in our local queue
                 if let Some(item) = self.art_queue.get_mut(item_index) {
@@ -36,8 +36,7 @@ impl App {
                 }
 
                 let base_msg = format!(
-                    "📋 Queue item {}: '{}' - placed {}/{} pixels at ({}, {})",
-                    item_index + 1,
+                    "📋 '{}' - placed {}/{} pixels at ({}, {})",
                     art_name,
                     pixels_placed, // Show successful placements count
                     total_pixels,
@@ -45,29 +44,7 @@ impl App {
                     position.1
                 );
 
-                if let Some(cooldown) = cooldown_remaining {
-                    if cooldown > 120 {
-                        // Long cooldown - show in minutes
-                        let minutes = cooldown / 60;
-                        let seconds = cooldown % 60;
-                        if seconds > 0 {
-                            self.add_status_message(format!(
-                                "{} | Long cooldown: {}m {}s",
-                                base_msg, minutes, seconds
-                            ));
-                        } else {
-                            self.add_status_message(format!(
-                                "{} | Long cooldown: {}m",
-                                base_msg, minutes
-                            ));
-                        }
-                    } else {
-                        // Normal cooldown
-                        self.add_status_message(format!("{} | Cooldown: {}s", base_msg, cooldown));
-                    }
-                } else {
-                    self.add_status_message(base_msg);
-                }
+                self.add_status_message(base_msg);
             }
             QueueUpdate::ItemCompleted {
                 item_index,
@@ -83,8 +60,7 @@ impl App {
                 }
 
                 self.add_status_message(format!(
-                    "✅ Queue item {}: '{}' completed - {}/{} pixels placed",
-                    item_index + 1,
+                    "✅ '{}' completed - {}/{} pixels placed",
                     art_name,
                     pixels_placed,
                     total_pixels
@@ -101,8 +77,7 @@ impl App {
                 }
 
                 self.add_status_message(format!(
-                    "❌ Queue item {}: '{}' failed - {}",
-                    item_index + 1,
+                    "❌ '{}' failed - {}",
                     art_name,
                     error_msg
                 ));
@@ -132,8 +107,7 @@ impl App {
                 }
 
                 self.add_status_message(format!(
-                    "⏭️ Queue item {}: '{}' skipped - {}",
-                    item_index + 1,
+                    "⏭️ '{}' skipped - {}",
                     art_name,
                     reason
                 ));
@@ -189,28 +163,26 @@ impl App {
                 self.queue_receiver = None;
             }
             QueueUpdate::QueuePaused {
-                item_index,
+                item_index: _,
                 art_name,
                 pixels_placed,
                 total_pixels,
             } => {
                 self.queue_paused = true;
                 self.add_status_message(format!(
-                    "⏸️ Queue paused at item {}: '{}' - {}/{} pixels placed. Press Esc to cancel.",
-                    item_index + 1,
+                    "⏸️ '{}' paused - {}/{} pixels placed. Press Esc to cancel.",
                     art_name,
                     pixels_placed,
                     total_pixels
                 ));
             }
             QueueUpdate::QueueResumed {
-                item_index,
+                item_index: _,
                 art_name,
             } => {
                 self.queue_paused = false;
                 self.add_status_message(format!(
-                    "▶️ Queue resumed at item {}: '{}'",
-                    item_index + 1,
+                    "▶️ '{}' resumed",
                     art_name
                 ));
             }
