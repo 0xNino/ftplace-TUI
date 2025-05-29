@@ -236,77 +236,133 @@ impl App {
                 user_info.pixel_buffer
             };
 
-            if available_pixels > 0 {
-                format!("🟢 {} pixels available", available_pixels)
-            } else if let Some(timers) = &user_info.timers {
-                if !timers.is_empty() {
-                    let current_time_ms = chrono::Utc::now().timestamp_millis();
-                    let mut active_timers = Vec::new();
-                    let mut next_available_ms = i64::MAX;
-
-                    for (i, &timer_ms) in timers.iter().enumerate() {
-                        let remaining_ms = timer_ms - current_time_ms;
-                        if remaining_ms > 0 {
-                            let remaining_secs = (remaining_ms as f64 / 1000.0).ceil() as u64;
-
-                            if remaining_secs > 60 {
-                                let minutes = remaining_secs / 60;
-                                let seconds = remaining_secs % 60;
-                                if seconds > 0 {
-                                    active_timers.push(format!(
-                                        "T{}:{:2}m{:02}s",
-                                        i + 1,
-                                        minutes,
-                                        seconds
-                                    ));
-                                } else {
-                                    active_timers.push(format!("T{}:{:2}m   ", i + 1, minutes));
-                                }
-                            } else {
-                                active_timers.push(format!("T{}:{:2}s   ", i + 1, remaining_secs));
-                            }
-
-                            if timer_ms < next_available_ms {
-                                next_available_ms = timer_ms;
-                            }
-                        }
-                    }
-
-                    if active_timers.is_empty() {
-                        "🟢 Ready to place pixels".to_string()
-                    } else {
-                        let next_remaining_ms = next_available_ms - current_time_ms;
-                        let next_remaining_secs = (next_remaining_ms as f64 / 1000.0).ceil() as u64;
-
-                        let next_pixel_str = if next_remaining_secs > 60 {
-                            let minutes = next_remaining_secs / 60;
-                            let seconds = next_remaining_secs % 60;
-                            if seconds > 0 {
-                                format!("{:2}m{:02}s", minutes, seconds)
-                            } else {
-                                format!("{:2}m    ", minutes)
-                            }
-                        } else {
-                            format!("{:2}s    ", next_remaining_secs)
-                        };
-
-                        format!("🔴 Next: {} | {}", next_pixel_str, active_timers.join(", "))
-                    }
-                } else {
-                    format!(
-                        "🟡 No active timers - Cooldown: {}s",
-                        user_info.pixel_timer * 60 // Convert minutes to seconds
-                    )
-                }
-            } else {
-                format!(
-                    "🟡 No timers data - Cooldown: {}s",
-                    user_info.pixel_timer * 60 // Convert minutes to seconds
-                )
+            if available_pixels >= user_info.pixel_buffer {
+                return "🟢 All pixels available".to_string();
             }
+
+            if let Some(timers) = &user_info.timers {
+                if !timers.is_empty() {
+                    return self.create_timer_timeline(user_info, timers, available_pixels);
+                }
+            }
+
+            format!(
+                "🟡 No active timers - Cooldown: {}min",
+                user_info.pixel_timer
+            )
         } else {
             "⚪ No user info - use 'p' to fetch profile".to_string()
         }
+    }
+
+    /// Create a timeline progress bar showing all timers
+    fn create_timer_timeline(
+        &self,
+        user_info: &UserInfos,
+        timers: &[i64],
+        available_pixels: i32,
+    ) -> String {
+        let current_time_ms = chrono::Utc::now().timestamp_millis();
+        let total_cooldown_secs = (user_info.pixel_timer * 60) as f64; // Convert minutes to seconds
+
+        // Timeline parameters
+        const TIMELINE_WIDTH: usize = 50;
+        const AVAILABLE_CHAR: char = '█';
+        const COOLDOWN_CHAR: char = '░';
+        const TIMER_CHAR: char = '●';
+        const SOON_CHAR: char = '○'; // For timers finishing soon (< 2 min)
+
+        // Calculate available zone width
+        let available_zone_width = if available_pixels > 0 {
+            ((available_pixels as f64 / user_info.pixel_buffer as f64) * TIMELINE_WIDTH as f64)
+                as usize
+        } else {
+            0
+        };
+
+        // Create base timeline
+        let mut timeline: Vec<char> = Vec::with_capacity(TIMELINE_WIDTH);
+
+        // Fill available zone
+        for _ in 0..available_zone_width.min(TIMELINE_WIDTH) {
+            timeline.push(AVAILABLE_CHAR);
+        }
+
+        // Fill cooldown zone
+        for _ in available_zone_width..TIMELINE_WIDTH {
+            timeline.push(COOLDOWN_CHAR);
+        }
+
+        // Place timer markers
+        let mut next_available_secs = f64::MAX;
+        let mut active_timer_count = 0;
+
+        for &timer_ms in timers {
+            let remaining_ms = timer_ms - current_time_ms;
+            if remaining_ms > 0 {
+                let remaining_secs = remaining_ms as f64 / 1000.0;
+                next_available_secs = next_available_secs.min(remaining_secs);
+                active_timer_count += 1;
+
+                // Calculate position on timeline (0 = available, TIMELINE_WIDTH = full cooldown)
+                let position_ratio = remaining_secs / total_cooldown_secs;
+                let timeline_position = (position_ratio * TIMELINE_WIDTH as f64) as usize;
+
+                if timeline_position < TIMELINE_WIDTH {
+                    // Use different char for timers finishing soon
+                    let timer_symbol = if remaining_secs < 120.0 {
+                        // Less than 2 minutes
+                        SOON_CHAR
+                    } else {
+                        TIMER_CHAR
+                    };
+                    timeline[timeline_position] = timer_symbol;
+                }
+            }
+        }
+
+        // Create timeline string
+        let timeline_str: String = timeline.into_iter().collect();
+
+        // Format next available time
+        let next_time_str = if next_available_secs != f64::MAX {
+            let next_secs = next_available_secs as u64;
+            if next_secs > 60 {
+                let minutes = next_secs / 60;
+                let seconds = next_secs % 60;
+                if seconds > 0 {
+                    format!("{}m{:02}s", minutes, seconds)
+                } else {
+                    format!("{}m", minutes)
+                }
+            } else {
+                format!("{}s", next_secs)
+            }
+        } else {
+            "ready".to_string()
+        };
+
+        // Create labels
+        let buffer_status = format!("Buffer: {}/{}", available_pixels, user_info.pixel_buffer);
+
+        // Create properly aligned timeline labels
+        let total_minutes = total_cooldown_secs as u64 / 60;
+        let left_label = "0min";
+        let right_label = format!("{}min", total_minutes);
+
+        // Calculate spacing to align right label with end of timeline
+        let spacing_needed = TIMELINE_WIDTH.saturating_sub(left_label.len() + right_label.len());
+        let timeline_labels = format!(
+            "{}{}{}",
+            left_label,
+            " ".repeat(spacing_needed),
+            right_label
+        );
+
+        format!(
+            "Pixel Cooldown Timeline\n{}\n{}\nNext: {} | {} | {} timers ● active ○ soon",
+            timeline_labels, timeline_str, next_time_str, buffer_status, active_timer_count
+        )
     }
 
     /// Clean up old status messages (older than 10 minutes)

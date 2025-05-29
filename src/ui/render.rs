@@ -12,14 +12,30 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
 pub fn render_ui(app: &mut App, frame: &mut Frame) {
-    let main_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5), // Increased height for Base URL selection list or input
-            Constraint::Min(0),    // Board Display or Art Editor
-            Constraint::Length(6), // Controls / Status - Reduced from 8 to 6 for more queue space
-        ])
-        .split(frame.size());
+    // Check if terminal is wide enough for side-by-side layout
+    let use_wide_layout = frame.size().width >= 140;
+
+    // Create different layouts based on width
+    let main_layout = if use_wide_layout {
+        // Wide layout: Input area + full content area (no status box)
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(5), // Input area
+                Constraint::Min(0),    // Content area (board + log) - takes all remaining space
+            ])
+            .split(frame.size())
+    } else {
+        // Standard layout: Input area + content area + status box
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(5), // Input area
+                Constraint::Min(0),    // Content area (board only)
+                Constraint::Length(6), // Status box
+            ])
+            .split(frame.size())
+    };
 
     // --- Input Area (Top) ---
     let input_area_rect = main_layout[0];
@@ -142,13 +158,11 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
         }
     }
 
-    // Check if terminal is wide enough for side-by-side layout
-    let use_wide_layout = frame.size().width >= 120;
-
-    // --- Main Content Area (main_layout[1]) ---
+    // --- Main Content Area ---
+    let content_area = main_layout[1];
     match app.input_mode {
         InputMode::ArtEditor => {
-            render_art_editor_ui(app, frame, main_layout[1]);
+            render_art_editor_ui(app, frame, content_area);
         }
         InputMode::ArtPreview => {
             // For art preview, we want to use the full screen, not just the board area
@@ -156,17 +170,20 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
         }
         _ => {
             if use_wide_layout {
-                // Wide layout: Board on left (75%), Log history on right (25%)
-                render_wide_layout(app, frame, main_layout[1], main_layout[2]);
+                // Wide layout: Board on left (80%), Log history on right (20%)
+                render_wide_layout(app, frame, content_area, Rect::default()); // No status area in wide layout
             } else {
                 // Standard layout: Board in center, status at bottom
-                render_board_display(app, frame, main_layout[1]);
+                render_board_display(app, frame, content_area);
             }
         }
     }
 
-    // --- Status Message Area (main_layout[2]) - Always render the status area ---
-    render_status_area(app, frame, main_layout[2]);
+    // --- Status Message Area - Only render if not using wide layout ---
+    if !use_wide_layout {
+        let status_area = main_layout[2];
+        render_status_area(app, frame, status_area);
+    }
 
     // Cursor handling is now within specific input mode rendering logic above for text input
     // or handled by ListState for selection.
@@ -256,10 +273,7 @@ fn render_board_display(app: &mut App, frame: &mut Frame, area: Rect) {
             .board_load_start
             .map(|start| start.elapsed().as_secs())
             .unwrap_or(0);
-        format!(
-            "Board Display - Loading... ({}s) - Size {}x{}",
-            elapsed, board_pixel_width, board_pixel_height
-        )
+        format!("Board Display - Loading... ({}s)", elapsed)
     } else {
         format!(
             "Board Display (Viewport @ {},{} - Size {}x{})",
@@ -415,10 +429,7 @@ fn render_board_display_left_aligned(app: &mut App, frame: &mut Frame, area: Rec
             .board_load_start
             .map(|start| start.elapsed().as_secs())
             .unwrap_or(0);
-        format!(
-            "Board Display - Loading... ({}s) - Size {}x{}",
-            elapsed, board_pixel_width, board_pixel_height
-        )
+        format!("Board Display - Loading... ({}s)", elapsed)
     } else {
         format!(
             "Board Display (Viewport @ {},{} - Size {}x{})",
@@ -511,14 +522,39 @@ fn render_log_history_panel(app: &App, frame: &mut Frame, area: Rect) {
     let mut log_lines = Vec::new();
     let max_lines = (area.height.saturating_sub(2)) as usize; // Account for borders
 
-    // Add timer status as sticky header
+    // Add timer status as sticky header - now handles multi-line timeline
     let timer_status = app.get_formatted_timer_status();
-    log_lines.push(Line::from(Span::styled(
-        format!("⏱️  {}", timer_status),
-        Style::default()
-            .add_modifier(Modifier::BOLD)
-            .fg(Color::Yellow),
-    )));
+
+    // Check if this is the new timeline format (contains newlines)
+    if timer_status.contains('\n') {
+        // Split timeline into separate lines and add each one
+        for (i, line) in timer_status.lines().enumerate() {
+            let style = if i == 0 {
+                // First line (title) - bold yellow
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::Yellow)
+            } else if line.contains('█') || line.contains('░') || line.contains('●') {
+                // Timeline bar - cyan for visual emphasis
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::Cyan)
+            } else {
+                // Other lines (labels, status) - normal yellow
+                Style::default().fg(Color::Yellow)
+            };
+
+            log_lines.push(Line::from(Span::styled(line, style)));
+        }
+    } else {
+        // Fallback for single-line format
+        log_lines.push(Line::from(Span::styled(
+            format!("⏱️  {}", timer_status),
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Yellow),
+        )));
+    }
 
     // Add current status message if not empty
     if !app.status_message.is_empty() {
@@ -526,7 +562,7 @@ fn render_log_history_panel(app: &App, frame: &mut Frame, area: Rect) {
             format!("📢 {}", app.status_message),
             Style::default()
                 .add_modifier(Modifier::BOLD)
-                .fg(Color::Cyan),
+                .fg(Color::Green),
         )));
     }
 
