@@ -135,8 +135,7 @@ impl App {
             self.status_messages.pop_front();
         }
 
-        // Update main status message
-        self.status_message = message;
+        // Note: We no longer overwrite status_message here to preserve contextual guidance
     }
 
     /// Update the persistent cooldown status

@@ -13,7 +13,7 @@ pub fn render_help_popup(_app: &App, frame: &mut Frame) {
         )),
         Line::from(" q: Quit application"),
         Line::from(" ?: Toggle this help screen"),
-        Line::from(" c: Configure/Re-enter Access Token"),
+        Line::from(" c: Configure/Re-enter Base URL and tokens"),
         Line::from(" b: Change Base URL"),
         Line::from(" r: Refresh board data"),
         Line::from(" p: Fetch profile data"),

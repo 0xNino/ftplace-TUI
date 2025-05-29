@@ -323,6 +323,14 @@ impl App {
                 }
             }
             KeyCode::Char('q') => self.exit = true,
+            KeyCode::Esc => {
+                // Cancel configuration and return to main mode without changing existing config
+                self.input_mode = InputMode::None;
+                self.add_status_message(
+                    "Configuration cancelled. Existing config preserved.".to_string(),
+                );
+                self.input_buffer.clear();
+            }
             _ => {}
         }
         Ok(())
@@ -333,7 +341,7 @@ impl App {
             KeyCode::Enter => {
                 let url = self.input_buffer.trim().to_string();
                 if url.is_empty() || !(url.starts_with("http://") || url.starts_with("https://")) {
-                    self.status_message = "Invalid URL. Must start with http:// or https://. Please re-enter Custom Base URL:".to_string();
+                    self.add_status_message("Invalid URL. Must start with http:// or https://. Please re-enter Custom Base URL.".to_string());
                     self.input_buffer.clear();
                 } else {
                     self.api_client.set_base_url(url);
@@ -478,7 +486,7 @@ impl App {
                             art_name, art_position.0, art_position.1
                         );
                     } else {
-                        self.status_message = "No art loaded to place.".to_string();
+                        self.add_status_message("No art loaded to place.".to_string());
                     }
                 }
                 KeyCode::Esc => {
@@ -488,7 +496,7 @@ impl App {
                         self.placement_in_progress = false;
                         self.placement_start = None;
                         self.placement_receiver = None;
-                        self.status_message = "Art placement cancelled.".to_string();
+                        self.add_status_message("Art placement cancelled.".to_string());
                     } else {
                         // Cancel loaded art
                         self.loaded_art = None;
@@ -520,8 +528,9 @@ impl App {
                 }
                 KeyCode::Char('q') => self.exit = true,
                 KeyCode::Char('c') => {
-                    self.input_mode = InputMode::EnterAccessToken;
-                    self.status_message = "Re-enter Access Token (current will be overwritten if new is provided, skip Refresh Token step if not needed):".to_string();
+                    self.input_mode = InputMode::EnterBaseUrl;
+                    self.status_message = "Select API Base URL or choose Custom:".to_string();
+                    self.base_url_selection_index = 0; // Reset selection to first option (Polylan)
                     self.input_buffer.clear();
                 }
                 KeyCode::Char('b') => {
@@ -1018,7 +1027,7 @@ impl App {
                 self.art_queue.clear();
                 self.queue_selection_index = 0;
                 let _ = self.save_queue(); // Auto-save after clearing
-                self.status_message = "Queue cleared.".to_string();
+                self.add_status_message("Queue cleared.".to_string());
             }
             KeyCode::Delete | KeyCode::Char('d') => {
                 // Remove selected item from queue

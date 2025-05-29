@@ -17,7 +17,7 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
         .constraints([
             Constraint::Length(5), // Increased height for Base URL selection list or input
             Constraint::Min(0),    // Board Display or Art Editor
-            Constraint::Length(5), // Controls / Status
+            Constraint::Length(8), // Controls / Status - Increased from 5 to 8 for more status messages
         ])
         .split(frame.size());
 
@@ -28,7 +28,14 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
             let items: Vec<ListItem> = app
                 .base_url_options
                 .iter()
-                .map(|opt| ListItem::new(opt.as_str()))
+                .map(|opt| {
+                    let display_text = if opt == "https://ftplace.42lwatch.ch" {
+                        format!("{} (Polylan)", opt)
+                    } else {
+                        opt.clone()
+                    };
+                    ListItem::new(display_text)
+                })
                 .collect();
 
             let list_widget = List::new(items)
@@ -124,12 +131,13 @@ pub fn render_ui(app: &mut App, frame: &mut Frame) {
             }
 
             // Add shortcuts help on a new line
-            display_text.push_str("\n\nq: Quit | ?: Help | c: Config Token | r: Refresh | p: Profile | h: History | w: Queue | l: Load Art");
+            display_text.push_str("\n\nq: Quit | ?: Help | c: Configure | r: Refresh | p: Profile | h: History | w: Queue | l: Load Art");
 
-            let config_display_widget =
-                Paragraph::new(display_text).block(Block::default().borders(Borders::ALL).title(
-                    "Current Config & Shortcuts (b to edit Base URL, c to edit AccessToken)",
-                ));
+            let config_display_widget = Paragraph::new(display_text).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Current Config & Shortcuts (b/c to configure Base URL and tokens)"),
+            );
             frame.render_widget(config_display_widget, input_area_rect);
         }
     }
@@ -476,7 +484,17 @@ fn render_status_area(app: &App, frame: &mut Frame, area: Rect) {
     let mut status_lines = Vec::new();
     let max_lines = (area.height.saturating_sub(2)) as usize; // Account for borders
 
-    // Show buffer/timer status as the first line if we have user info
+    // Always show the current status_message as the first line (if not empty)
+    if !app.status_message.is_empty() {
+        let truncated_status = if app.status_message.len() > 80 {
+            format!("{}...", &app.status_message[..77])
+        } else {
+            app.status_message.clone()
+        };
+        status_lines.push(truncated_status);
+    }
+
+    // Show buffer/timer status as the second line if we have user info
     if let Some(user_info) = &app.user_info {
         let available_pixels = if let Some(timers) = &user_info.timers {
             user_info.pixel_buffer - timers.len() as i32
@@ -508,16 +526,6 @@ fn render_status_area(app: &App, frame: &mut Frame, area: Rect) {
             };
             status_lines.push(format!("• {}", truncated_message));
         }
-    }
-
-    // If no messages and no buffer info, show the main status
-    if status_lines.is_empty() {
-        let truncated_status = if app.status_message.len() > 80 {
-            format!("{}...", &app.status_message[..77])
-        } else {
-            app.status_message.clone()
-        };
-        status_lines.push(truncated_status);
     }
 
     let status_text = status_lines.join("\n");

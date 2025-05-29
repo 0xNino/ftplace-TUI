@@ -41,6 +41,7 @@ impl App {
         );
 
         let base_url_options = vec![
+            "https://ftplace.42lwatch.ch".to_string(),
             "https://ftplace.42lausanne.ch".to_string(),
             "http://localhost:7979".to_string(),
             "Custom".to_string(),
