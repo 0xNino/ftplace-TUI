@@ -360,12 +360,39 @@ pub fn render_status_log_popup(app: &App, frame: &mut Frame) {
 
     // Add timer status as sticky header
     let timer_status = app.get_formatted_timer_status();
-    log_lines.push(Line::from(Span::styled(
-        format!("⏱️  {}", timer_status),
-        Style::default()
-            .add_modifier(Modifier::BOLD)
-            .fg(Color::Yellow),
-    )));
+
+    // Handle multi-line timer status properly
+    if timer_status.contains('\n') {
+        // Split multi-line timer status into separate lines
+        let timer_lines: Vec<&str> = timer_status.split('\n').collect();
+        for (i, line) in timer_lines.iter().enumerate() {
+            if i == 0 {
+                // First line gets the timer emoji
+                log_lines.push(Line::from(Span::styled(
+                    format!("⏱️  {}", line),
+                    Style::default()
+                        .add_modifier(Modifier::BOLD)
+                        .fg(Color::Yellow),
+                )));
+            } else {
+                // Subsequent lines are indented to align with the timer content
+                log_lines.push(Line::from(Span::styled(
+                    format!("   {}", line), // 3 spaces to align with emoji + space
+                    Style::default()
+                        .add_modifier(Modifier::BOLD)
+                        .fg(Color::Yellow),
+                )));
+            }
+        }
+    } else {
+        // Single line timer status (fallback)
+        log_lines.push(Line::from(Span::styled(
+            format!("⏱️  {}", timer_status),
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Yellow),
+        )));
+    }
     log_lines.push(Line::from(Span::styled(
         "─".repeat(70), // Separator line
         Style::default().fg(Color::Gray),
