@@ -158,6 +158,12 @@ impl App {
             let mut api_client =
                 crate::api_client::ApiClient::new(Some(base_url), access_token, refresh_token);
 
+            // Set up callback to save refreshed tokens to storage
+            if let Ok(callback) = crate::api_client::create_token_refresh_callback(None) {
+                api_client.set_token_refresh_callback(callback);
+            }
+            // Note: We don't fail the placement if callback setup fails
+
             let mut pixels_placed = 0;
             let mut user_info: Option<UserInfos> = None;
 

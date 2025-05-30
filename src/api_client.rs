@@ -7,6 +7,9 @@ use std::io::Write; // For file logging
 // API Endpoint Base URL - can be configured later
 const API_BASE_URL: &str = "https://ftplace.42lausanne.ch"; // TODO: Make this configurable
 
+// Callback type for when tokens are refreshed
+pub type TokenRefreshCallback = Box<dyn Fn(Option<String>, Option<String>) + Send + Sync>;
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct ColorInfo {
     pub id: i32, // Assuming color ID is an integer
@@ -128,12 +131,32 @@ impl From<reqwest::Error> for ApiError {
     }
 }
 
-#[derive(Debug)]
 pub struct ApiClient {
     client: reqwest::Client,
     base_url: String,
     access_token: Option<String>,
     refresh_token: Option<String>,
+    token_refresh_callback: Option<TokenRefreshCallback>,
+}
+
+impl std::fmt::Debug for ApiClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ApiClient")
+            .field("base_url", &self.base_url)
+            .field(
+                "access_token",
+                &self.access_token.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "token_refresh_callback",
+                &self.token_refresh_callback.is_some(),
+            )
+            .finish()
+    }
 }
 
 impl ApiClient {
@@ -150,6 +173,7 @@ impl ApiClient {
             base_url: base_url.unwrap_or_else(|| API_BASE_URL.to_string()),
             access_token,
             refresh_token,
+            token_refresh_callback: None,
         }
     }
 
@@ -158,8 +182,17 @@ impl ApiClient {
     }
 
     pub fn set_tokens(&mut self, access: Option<String>, refresh: Option<String>) {
-        self.access_token = access;
-        self.refresh_token = refresh;
+        self.access_token = access.clone();
+        self.refresh_token = refresh.clone();
+
+        // Call the callback if it's set
+        if let Some(ref callback) = self.token_refresh_callback {
+            callback(access, refresh);
+        }
+    }
+
+    pub fn set_token_refresh_callback(&mut self, callback: TokenRefreshCallback) {
+        self.token_refresh_callback = Some(callback);
     }
 
     // Getter for access token, primarily for use when setting the other token
@@ -317,6 +350,10 @@ impl ApiClient {
                 }
             }
             if new_access_token_found {
+                // Call the callback if it's set to persist the new tokens
+                if let Some(ref callback) = self.token_refresh_callback {
+                    callback(self.access_token.clone(), self.refresh_token.clone());
+                }
                 return Err(ApiError::TokenRefreshedPleaseRetry);
             } else {
                 // If 426 but no new token found in Set-Cookie, treat as unexpected or error
@@ -440,6 +477,27 @@ impl ApiClient {
         })
         .await
     }
+}
+
+/// Utility function to create a token refresh callback that saves tokens to storage
+pub fn create_token_refresh_callback(
+    base_url: Option<String>,
+) -> Result<TokenRefreshCallback, Box<dyn std::error::Error>> {
+    let storage = crate::token_storage::TokenStorage::new()?;
+    let storage = std::sync::Arc::new(std::sync::Mutex::new(storage));
+
+    Ok(Box::new(
+        move |access_token: Option<String>, refresh_token: Option<String>| {
+            if let Ok(storage) = storage.lock() {
+                let token_data = crate::token_storage::TokenData {
+                    access_token,
+                    refresh_token,
+                    base_url: base_url.clone(),
+                };
+                let _ = storage.save(&token_data);
+            }
+        },
+    ) as TokenRefreshCallback)
 }
 
 // Need to add this module to main.rs or lib.rs

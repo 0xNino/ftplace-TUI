@@ -359,6 +359,18 @@ impl App {
             let mut api_client =
                 crate::api_client::ApiClient::new(Some(base_url), access_token, refresh_token);
 
+            // Set up callback to save refreshed tokens to storage
+            if let Ok(callback) = crate::api_client::create_token_refresh_callback(None) {
+                api_client.set_token_refresh_callback(callback);
+            } else {
+                let _ = tx.send(QueueUpdate::ItemFailed {
+                    item_index: 0,
+                    art_name: "Queue".to_string(),
+                    error_msg: "Failed to initialize token storage".to_string(),
+                });
+                return;
+            }
+            
             let mut processed_count = 0;
             let mut total_pixels_placed = 0;
             let start_time = Instant::now();

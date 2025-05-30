@@ -120,6 +120,12 @@ impl App {
                 crate::api_client::ApiClient::new(Some(base_url), access_token, refresh_token);
             let mut control_rx = control_rx;
 
+            // Set up callback to save refreshed tokens to storage
+            if let Ok(callback) = crate::api_client::create_token_refresh_callback(None) {
+                api_client.set_token_refresh_callback(callback);
+            }
+            // Note: We don't fail the validation if callback setup fails
+
             const VALIDATION_INTERVAL_SECONDS: u64 = 300; // 5 minutes
 
             loop {

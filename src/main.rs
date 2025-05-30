@@ -34,11 +34,20 @@ impl App {
         let saved_tokens = token_storage.load();
 
         // Initialize API client with saved tokens and base URL
-        let api_client = ApiClient::new(
+        let mut api_client = ApiClient::new(
             saved_tokens.base_url.clone(),
             saved_tokens.access_token.clone(),
             saved_tokens.refresh_token.clone(),
         );
+
+        // Set up callback to save refreshed tokens to storage
+        if let Ok(callback) =
+            crate::api_client::create_token_refresh_callback(saved_tokens.base_url.clone())
+        {
+            api_client.set_token_refresh_callback(callback);
+        } else {
+            eprintln!("Warning: Could not set up token refresh callback");
+        }
 
         let base_url_options = vec![
             "https://ftplace.42lwatch.ch".to_string(),

@@ -248,15 +248,28 @@ The application supports multiple predefined endpoints:
 
 ### Token Management
 
-Tokens are automatically saved to `tokens.json` and restored on startup. The file contains:
+The TUI implements robust token management to handle long-running operations:
 
-```json
-{
-	"base_url": "https://ftplace.42lausanne.ch",
-	"access_token": "jwt_token_here",
-	"refresh_token": "refresh_token_here"
-}
-```
+### Token Refresh Mechanism
+
+- The application automatically refreshes expired JWT tokens during API calls
+- When the backend returns a 426 status code, new tokens are extracted from Set-Cookie headers
+- **Automatic Persistence**: Refreshed tokens are automatically saved to `~/.ftplace_tokens.json`
+- This ensures queue processing can continue overnight without interruption
+
+### Background Task Token Handling
+
+All background tasks (queue processing, board fetching, validation, etc.) now include token refresh callbacks that:
+
+- Detect when tokens are refreshed during API operations
+- Automatically save the new tokens to persistent storage
+- Prevent token expiration from stopping long-running queue processing
+
+### Token Storage
+
+- Tokens are stored in `~/.ftplace_tokens.json` in your home directory
+- File permissions are set to 600 (owner read/write only) for security
+- Both access and refresh tokens are persisted along with the base URL
 
 ### Queue Persistence
 

@@ -81,6 +81,12 @@ impl App {
             let mut api_client =
                 crate::api_client::ApiClient::new(Some(base_url), access_token, refresh_token);
 
+            // Set up callback to save refreshed tokens to storage
+            if let Ok(callback) = crate::api_client::create_token_refresh_callback(None) {
+                api_client.set_token_refresh_callback(callback);
+            }
+            // Note: We don't fail the profile fetch if callback setup fails, just log it
+
             let result = match api_client.get_profile().await {
                 Ok(profile_response) => ProfileFetchResult::Success(profile_response.user_infos),
                 Err(e) => {

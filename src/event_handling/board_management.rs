@@ -33,10 +33,20 @@ impl App {
         // Add API call log to status messages
         self.log_api_call("GET", "/api/get", None);
 
-        // Spawn async task for board fetching
+        // Spawn async task for background board loading
         tokio::spawn(async move {
             let mut api_client =
                 crate::api_client::ApiClient::new(Some(base_url), access_token, refresh_token);
+
+            // Set up callback to save refreshed tokens to storage
+            if let Ok(callback) = crate::api_client::create_token_refresh_callback(None) {
+                api_client.set_token_refresh_callback(callback);
+            } else {
+                let _ = tx.send(BoardFetchResult::Error(
+                    "Failed to initialize token storage".to_string(),
+                ));
+                return;
+            }
 
             let result = match api_client.get_board().await {
                 Ok(board_response) => BoardFetchResult::Success(board_response),
