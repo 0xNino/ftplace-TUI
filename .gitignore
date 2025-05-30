@@ -22,3 +22,6 @@ shares/
 !patterns/42_lausanne.json
 
 .cursor/
+.cursorignore
+
+.DS_Store
