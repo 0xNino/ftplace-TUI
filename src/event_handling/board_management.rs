@@ -48,8 +48,24 @@ impl App {
                 return;
             }
 
+            // Store initial tokens for comparison
+            let initial_tokens = api_client.get_tokens();
+
             let result = match api_client.get_board().await {
-                Ok(board_response) => BoardFetchResult::Success(board_response),
+                Ok(board_response) => {
+                    // Check if tokens were updated during the request
+                    let current_tokens = api_client.get_tokens();
+                    let tokens_changed = initial_tokens != current_tokens;
+
+                    BoardFetchResult::Success {
+                        board_response,
+                        updated_tokens: if tokens_changed {
+                            Some(current_tokens)
+                        } else {
+                            None
+                        },
+                    }
+                }
                 Err(e) => BoardFetchResult::Error(format!("{:?}", e)),
             };
 
@@ -66,9 +82,17 @@ impl App {
             .unwrap_or(0);
 
         match result {
-            BoardFetchResult::Success(board_response) => {
+            BoardFetchResult::Success {
+                board_response,
+                updated_tokens,
+            } => {
                 // Log successful API call
                 self.log_api_call("GET", "/api/get", Some(200));
+
+                // Update main API client tokens if they were refreshed
+                if let Some((access_token, refresh_token)) = updated_tokens {
+                    self.api_client.set_tokens(access_token, refresh_token);
+                }
 
                 self.board = board_response.board;
                 self.colors = board_response.colors;
@@ -161,6 +185,7 @@ impl App {
                 // Log successful API call
                 self.log_api_call("GET", "/api/get", Some(200));
 
+                // Tokens are already updated in the main API client via the retry mechanism
                 self.board = board_response.board;
                 self.colors = board_response.colors;
 

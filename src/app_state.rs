@@ -141,7 +141,10 @@ pub struct App {
 
 #[derive(Debug)]
 pub enum BoardFetchResult {
-    Success(BoardGetResponse),
+    Success {
+        board_response: BoardGetResponse,
+        updated_tokens: Option<(Option<String>, Option<String>)>, // (access_token, refresh_token)
+    },
     Error(String),
 }
 
@@ -239,7 +242,10 @@ pub enum QueueUpdate {
 
 #[derive(Debug)]
 pub enum ProfileFetchResult {
-    Success(crate::api_client::UserInfos),
+    Success {
+        user_infos: crate::api_client::UserInfos,
+        updated_tokens: Option<(Option<String>, Option<String>)>, // (access_token, refresh_token)
+    },
     Error(String),
 }
 

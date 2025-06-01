@@ -205,6 +205,11 @@ impl ApiClient {
         self.refresh_token.clone()
     }
 
+    /// Get both tokens for propagation (useful for updating main instance after background refresh)
+    pub fn get_tokens(&self) -> (Option<String>, Option<String>) {
+        (self.access_token.clone(), self.refresh_token.clone())
+    }
+
     #[allow(dead_code)]
     pub fn get_base_url_preview(&self) -> String {
         // Return a portion of the base_url or the full thing if short
@@ -322,43 +327,59 @@ impl ApiClient {
                 }
             }
         } else if status.as_u16() == 426 {
-            // Handle 426 for token refresh
-            let mut new_access_token_found = false;
-            let mut new_refresh_token_found = false;
-            for cookie_str_val in headers.get_all(reqwest::header::SET_COOKIE) {
-                if let Ok(cookie_str) = cookie_str_val.to_str() {
-                    if let Some(token_part) = cookie_str.split(';').next() {
-                        if token_part.trim().starts_with("token=") {
-                            let new_token_val =
-                                token_part.trim().trim_start_matches("token=").to_string();
-                            if !new_token_val.is_empty() {
-                                self.access_token = Some(new_token_val);
-                                new_access_token_found = true;
-                            }
-                        } else if token_part.trim().starts_with("refresh=") {
-                            let new_refresh_val =
-                                token_part.trim().trim_start_matches("refresh=").to_string();
-                            if !new_refresh_val.is_empty() {
-                                self.refresh_token = Some(new_refresh_val);
-                                new_refresh_token_found = true;
+            // Handle 426 for token refresh - improved cookie parsing
+            let mut new_access_token: Option<String> = None;
+            let mut new_refresh_token: Option<String> = None;
+
+            for cookie_header in headers.get_all(reqwest::header::SET_COOKIE) {
+                if let Ok(cookie_str) = cookie_header.to_str() {
+                    // Parse each cookie properly, handling attributes
+                    for cookie_part in cookie_str.split(',') {
+                        let cookie_part = cookie_part.trim();
+
+                        // Split on ';' to separate cookie value from attributes
+                        if let Some(cookie_value) = cookie_part.split(';').next() {
+                            let cookie_value = cookie_value.trim();
+
+                            if cookie_value.starts_with("token=") {
+                                let token_val =
+                                    cookie_value.trim_start_matches("token=").trim_matches('"');
+                                if !token_val.is_empty() && token_val != "deleted" {
+                                    new_access_token = Some(token_val.to_string());
+                                }
+                            } else if cookie_value.starts_with("refresh=") {
+                                let refresh_val = cookie_value
+                                    .trim_start_matches("refresh=")
+                                    .trim_matches('"');
+                                if !refresh_val.is_empty() && refresh_val != "deleted" {
+                                    new_refresh_token = Some(refresh_val.to_string());
+                                }
                             }
                         }
                     }
-                    if new_access_token_found && new_refresh_token_found {
-                        break;
-                    }
                 }
             }
-            if new_access_token_found {
-                // Call the callback if it's set to persist the new tokens
+
+            // Update tokens if we found new ones
+            if new_access_token.is_some() || new_refresh_token.is_some() {
+                // Update our tokens with the new values, keeping existing ones if not refreshed
+                if let Some(new_token) = new_access_token {
+                    self.access_token = Some(new_token);
+                }
+                if let Some(new_refresh) = new_refresh_token {
+                    self.refresh_token = Some(new_refresh);
+                }
+
+                // Call the callback to persist the new tokens
                 if let Some(ref callback) = self.token_refresh_callback {
                     callback(self.access_token.clone(), self.refresh_token.clone());
                 }
+
                 return Err(ApiError::TokenRefreshedPleaseRetry);
             } else {
-                // If 426 but no new token found in Set-Cookie, treat as unexpected or error
+                // If 426 but no new tokens found, treat as error
                 return Err(ApiError::UnexpectedResponse(format!(
-                    "Received 426 but no new token found in Set-Cookie. Response body: \"{}\"",
+                    "Received 426 (Token Refresh) but no valid tokens found in Set-Cookie headers. Response: {}",
                     response_text
                 )));
             }

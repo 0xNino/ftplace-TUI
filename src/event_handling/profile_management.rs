@@ -6,9 +6,17 @@ impl App {
     /// Handle profile fetch results from background profile fetch tasks
     pub fn handle_profile_fetch_result(&mut self, result: ProfileFetchResult) {
         match result {
-            ProfileFetchResult::Success(user_infos) => {
+            ProfileFetchResult::Success {
+                user_infos,
+                updated_tokens,
+            } => {
                 // Log successful API call
                 self.log_api_call("GET", "/api/profile", Some(200));
+
+                // Update main API client tokens if they were refreshed
+                if let Some((access_token, refresh_token)) = updated_tokens {
+                    self.api_client.set_tokens(access_token, refresh_token);
+                }
 
                 self.add_status_message(format!(
                     "Profile: {}, Pixels: {}, Cooldown: {}s, User Timers: {}",
@@ -87,8 +95,24 @@ impl App {
             }
             // Note: We don't fail the profile fetch if callback setup fails, just log it
 
+            // Store initial tokens for comparison
+            let initial_tokens = api_client.get_tokens();
+
             let result = match api_client.get_profile().await {
-                Ok(profile_response) => ProfileFetchResult::Success(profile_response.user_infos),
+                Ok(profile_response) => {
+                    // Check if tokens were updated during the request
+                    let current_tokens = api_client.get_tokens();
+                    let tokens_changed = initial_tokens != current_tokens;
+
+                    ProfileFetchResult::Success {
+                        user_infos: profile_response.user_infos,
+                        updated_tokens: if tokens_changed {
+                            Some(current_tokens)
+                        } else {
+                            None
+                        },
+                    }
+                }
                 Err(e) => {
                     let error_msg = match e {
                         crate::api_client::ApiError::Unauthorized => {
